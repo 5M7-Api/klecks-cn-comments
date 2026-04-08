@@ -16,8 +16,7 @@
     "build:help": "parcel build src/help.html --public-url .",
     "lang:add": "node src/languages/generate.js add",
     "lang:sync": "node src/languages/generate.js sync",
-    "lang:build": "node src/languages/generate.js build",
-    "test": "vitest run"
+    "lang:build": "node src/languages/generate.js build"
   },
   "dependencies": {
     "@parcel/transformer-glsl": "2.16.4",
@@ -30,9 +29,5 @@
     "parcel": "2.16.4",
     "polygon-clipping": "0.15.7",
     "transformation-matrix": "3.1.0"
-  },
-  "devDependencies": {
-    "jsdom": "29.0.1",
-    "vitest": "3.2.4"
   }
 }
