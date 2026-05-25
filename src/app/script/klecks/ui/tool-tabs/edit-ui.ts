@@ -404,7 +404,7 @@ This has been reported to Google.
         this.onCopyToClipboard = p.onCopyToClipboard;
         this.onPaste = p.onPaste;
 
-        this.rootEl = BB.el();
+        this.rootEl = BB.el(); // 根节点挂载（整体ROOT）
     }
 
     getElement(): HTMLElement {

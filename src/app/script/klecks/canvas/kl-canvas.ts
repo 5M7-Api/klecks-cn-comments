@@ -62,7 +62,9 @@ export type TLayerComposite = {
     draw: (ctx: CanvasRenderingContext2D) => void;
 };
 
-const KL_CANVAS_DEBUGGING = false;
+// 画布调试开关，开启后可以通过浏览器控制台访问 KlCanvas 实例的图层数据（getCanvasLayers()）以进行调试。
+// const KL_CANVAS_DEBUGGING = false;
+const KL_CANVAS_DEBUGGING = true;
 
 /**
  * The image/canvas that the user paints on
@@ -132,6 +134,7 @@ export class KlCanvas {
             image: HTMLCanvasElement;
         }[];
     }): number {
+        // 1. 参数校验：确保宽高是有效的正数（0尺寸及以下会报错）
         if (
             !p.width ||
             !p.height ||
@@ -142,30 +145,43 @@ export class KlCanvas {
         ) {
             throw new Error('invalid canvas size');
         }
+
+        // 2. 设置画布实例的内部尺寸
         this.width = p.width;
         this.height = p.height;
+        // 3. 清除当前的选区（因为是重置，所以不应该有选区）
         this.selection = undefined;
+        // 4. 清理图层数组
+        // 保留第0个图层，删除索引1及之后的所有图层
+        // splice(1, deleteCount) -> 从索引1开始，删除后面所有图层
         this.layers.splice(1, Math.max(0, this.layers.length - 1));
 
+         // 暂停历史记录，因为这些操作是初始化，不需要被记录为“步骤”
         this.klHistory.pause(true);
         try {
             if (p.layers) {
                 for (let i = 0; i < p.layers.length; i++) {
                     const pItem = p.layers[i];
+                    // 如果当前索引没有图层，则新建一个图层
                     if (!this.layers[i]) {
                         this.addLayer();
                     }
                     const layer = this.layers[i];
+                    // 复制元数据：ID、名称、可见性、混合模式
                     layer.id = pItem.id;
                     layer.name = pItem.name;
                     layer.isVisible = pItem.isVisible;
                     layer.mixModeStr = pItem.mixModeStr ? pItem.mixModeStr : 'source-over';
+                    // 调整图层画布尺寸以匹配新画布
                     layer.canvas.width = this.width;
                     layer.canvas.height = this.height;
+                    // 将传入的图像数据绘制到图层上
                     layer.context.drawImage(pItem.image, 0, 0);
+                    // 设置透明度
                     this.setOpacity(i, pItem.opacity);
                 }
             } else {
+                // 如果没有提供图层数据，则初始化一个默认图层
                 const layer = this.layers[0];
                 layer.name = p.layerName ? p.layerName : LANG('layers-layer') + ' 1';
                 layer.isVisible = true;
@@ -182,11 +198,14 @@ export class KlCanvas {
         } finally {
             this.klHistory.pause(false);
         }
-        this.updateIndices();
+        this.updateIndices();// 确保所有图层的 .index 属性与数组索引同步
 
+        // 如果历史记录未暂停（通常是开启状态）
         if (!this.klHistory.isPaused()) {
+            // 1. 生成历史记录数据对象
             const historyEntryData: THistoryEntryDataComposed = {
                 projectId: {
+                    // 如果传入了 projectId 则使用，否则生成新的 UUID
                     value: p.projectId ?? randomUuid(),
                 },
                 size: {
@@ -194,14 +213,21 @@ export class KlCanvas {
                     height: this.height,
                 },
                 selection: { value: this.selection },
+                 // 激活的图层设为最后一个图层
                 activeLayerId: this.layers[this.layers.length - 1].id,
+                 // 2. 生成图层映射快照
+                // createLayerMap 会捕获所有图层的当前状态（ID, name, opacity 等）
                 layerMap: createLayerMap(this.layers, {
                     attributes: 'all',
                 }) as Record<TLayerId, THistoryEntryLayerComposed>,
             };
+
+            // 3. 推送到历史栈
+            // 这标志着画布已成功重置，用户现在可以开始操作
             this.klHistory.push(historyEntryData);
         }
 
+        // 返回值：返回最后一个图层的索引（通常是 0，如果有多个图层则是 layers.length-1）
         return this.layers.length - 1;
     }
 
@@ -359,10 +385,13 @@ export class KlCanvas {
         if (this.isLayerLimitReached()) {
             return false;
         }
+        // 计算插入位置
         const index = selectedIndex === undefined ? this.layers.length : selectedIndex + 1;
 
+        // 创建一个指定宽高的canvas，并获取其2D上下文
         const canvas = BB.canvas(this.width, this.height);
         const context = BB.ctx(canvas);
+        // 如果提供了图像数据，则将其绘制到新图层的画布上
         if (data) {
             if (typeof data.image === 'function') {
                 data.image(context);
@@ -371,6 +400,7 @@ export class KlCanvas {
             }
         }
 
+        // 构建新的图层对象，分配唯一ID，并设置属性
         const layerId = getNextLayerId();
         const layer: TKlCanvasLayer = {
             id: layerId,
@@ -378,36 +408,39 @@ export class KlCanvas {
             name:
                 data && data.name !== undefined
                     ? data.name
-                    : LANG('layers-layer') + ' ' + (this.layers.length + this.layerNrOffset),
-            mixModeStr: data ? (data.mixModeStr ?? 'source-over') : 'source-over',
-            isVisible: data ? data.isVisible : true,
-            opacity: data ? data.opacity : 1,
-            canvas,
-            context,
+                    : LANG('layers-layer') + ' ' + (this.layers.length + this.layerNrOffset),  // 自动命名，如 "图层 3"
+            mixModeStr: data ? (data.mixModeStr ?? 'source-over') : 'source-over', // 默认正常混合
+            isVisible: data ? data.isVisible : true,// 默认可见
+            opacity: data ? data.opacity : 1,// 默认不透明
+            canvas,// 新创建的 <canvas> 元素
+            context,// 对应的 2D 上下文
         };
 
+        // splice 会在指定索引处插入，原有元素后移
         this.layers.splice(index, 0, layer);
 
+        // 暂停历史记录，因为 setOpacity 内部会 push 历史，但我们不想记录中间状态
         this.klHistory.pause(true);
         try {
-            this.setOpacity(index, 1);
+            this.setOpacity(index, 1); // 确保新图层透明度为 1（完全可见）
         } finally {
-            this.klHistory.pause(false);
+            this.klHistory.pause(false);  // 恢复历史记录
         }
-        this.updateIndices();
+        this.updateIndices(); // 遍历数组，将每个图层的 .index 属性更新为它在数组中的位置
 
         if (!this.klHistory.isPaused()) {
             this.klHistory.push({
-                activeLayerId: layerId,
+                activeLayerId: layerId, // 新图层成为当前激活的图层
                 layerMap: createLayerMap(
                     this.layers,
-                    { attributes: ['index'] },
+                    { attributes: ['index'] }, // 只记录其他图层的索引变化
                     {
                         layerId,
                         attributes: 'all',
+                        // 如果提供了图像数据，则不需要创建填充色的tiles；如果没有提供图像数据，则创建一个全透明的填充色tiles，以表示新图层是空的。
                         tiles: data
-                            ? undefined
-                            : createFillColorTiles(this.width, this.height, 'transparent'),
+                            ? undefined 
+                            : createFillColorTiles(this.width, this.height, 'transparent'), 
                     },
                 ),
             });

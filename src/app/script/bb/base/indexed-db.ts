@@ -5,10 +5,12 @@ export type TIndexedDbUpgrader = (event: IDBVersionChangeEvent) => void;
 // 2025-05-20
 // Blobs not supported on iPad in private tabs.
 // Blobs are required for indexed db to be useful. Data urls would be wasteful.
+// 测试是否indexedb支持blob url，如果不支持则认为indexeddb不可用
 const areBlobUrlsSupported = async function (): Promise<boolean> {
     let result = true;
     const dbName = 'kl-blob-url-test';
     try {
+        // 尝试构造一个test的blob测试indexeddb是否支持blob url
         const blob = new Blob(['test'], { type: 'text/plain' });
         const db = await timeoutWrapper(
             new Promise<IDBDatabase>((resolve, reject) => {

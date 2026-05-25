@@ -262,6 +262,8 @@ export class KlApp {
                   ? LocalStorage.getItem('uiState')
                   : 'right'
         ) as TUiLayout;
+
+        // 存储系统初始化
         const projectStore = KL_INDEXED_DB.getIsAvailable() ? new ProjectStore() : undefined;
         this.rootEl = BB.el({
             className: 'g-root',
@@ -289,6 +291,7 @@ export class KlApp {
         );
         const initialHeight = Math.max(10, Math.min(maxCanvasSize, this.uiHeight));
 
+        // 历史记录初始化
         this.klHistory = new KlHistory({
             oldest: projectToComposed(
                 p.project ?? {
@@ -313,6 +316,8 @@ export class KlApp {
                 },
             ),
         });
+
+        // 恢复管理器绑定
         const klRecoveryManager = p.klRecoveryManager;
         if (klRecoveryManager) {
             klRecoveryManager.setKlHistory(this.klHistory);
@@ -330,6 +335,7 @@ export class KlApp {
             });
         }
 
+        // 画布初始化
         this.klCanvas = new KL.KlCanvas(this.klHistory, this.embed ? -1 : 1);
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
@@ -415,6 +421,8 @@ export class KlApp {
             chainArr: [this.lineSanitizer as any, lineSmoothing as any],
         });
 
+        // 画笔事件链条
+        //用户的鼠标移动事件 -> 经过滤波器 (LineSanitizer) -> 经过平滑处理 (LineSmoothing) -> 最终由当前选中的画笔工具 (currentBrushUi) 执行绘制。
         drawEventChain.setChainOut(((event: TDrawEvent) => {
             if (event.type === 'down') {
                 this.toolspace.style.pointerEvents = 'none';
@@ -569,6 +577,7 @@ export class KlApp {
             },
         });
 
+        // 画笔工具实例
         this.easelBrush = new EaselBrush({
             radius: 5,
             onLineStart: (e) => {
@@ -817,6 +826,7 @@ export class KlApp {
             }
         };
 
+        // 键盘事件监听器
         const keyListener = new BB.KeyListener({
             onDown: (keyStr, event, comboStr) => {
                 if (KL.DIALOG_COUNTER.get() > 0 || BB.isInputFocused(true)) {

@@ -263,10 +263,12 @@ export class KlRecoveryManager {
     }
 
     setKlHistory(klHistory: KlHistory) {
+        // 保存传入的绘画历史对象
         this.klHistory = klHistory;
         let startTime = new Date().getTime();
         let lastStoredChangeCount = 0;
 
+        // 向绘画历史对象注册一个监听器，当用户进行任何操作（如画一笔、擦除等）时触发
         this.klHistory.addListener(async () => {
             if (this.isStoring) {
                 return;
@@ -277,6 +279,7 @@ export class KlRecoveryManager {
                 // initial store after 5 minutes
                 if (
                     this.tabId === undefined &&
+                    // 条件：要么时间没到5分钟，要么操作次数没达到阈值
                     (deltaMs < FIRST_RECOVERY_AFTER_MS ||
                         changeCount < FIRST_RECOVERY_AFTER_CHANGES)
                 ) {
@@ -301,8 +304,9 @@ export class KlRecoveryManager {
                 this.tabId = genNewId(storedIds);
                 isFreshDrawing = true;
             }
-            this.isStoring = true;
+            this.isStoring = true; // 上锁，防止并发保存
             try {
+                // 将当前绘画状态（历史记录 + 缩略图）保存到 IndexedDB
                 await storeRecovery(this.tabId, this.klHistory.getComposed(), this.getThumbnail!);
                 startTime = new Date().getTime();
             } catch (e) {
@@ -314,6 +318,7 @@ export class KlRecoveryManager {
             }
             if (isFreshDrawing) {
                 this.setHash(this.tabId);
+                 // 清理过期的恢复数据（例如其他标签页已关闭但残留的数据）
                 await clearOldRecoveries();
             }
             startTime = new Date().getTime();

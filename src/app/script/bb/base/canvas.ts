@@ -15,6 +15,12 @@ export function copyCanvas(canvas: HTMLCanvasElement | HTMLImageElement): HTMLCa
     return resultCanvas;
 }
 
+/**
+ * 获取 canvas 上 2D 上下文，如果获取失败则抛出错误
+ * @param canvas 
+ * @param options 
+ * @returns 
+ */
 export function ctx(
     canvas: HTMLCanvasElement,
     options?: CanvasRenderingContext2DSettings,

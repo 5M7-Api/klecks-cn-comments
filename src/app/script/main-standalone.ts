@@ -16,6 +16,7 @@ import {
 } from './klecks/storage/kl-indexed-db';
 import { KlRecoveryManager } from './klecks/storage/kl-recovery-manager';
 
+// 初始化错误模块
 function showInitError(e: Error): void {
     const el = document.createElement('div');
     el.style.textAlign = 'center';
@@ -34,6 +35,7 @@ function showInitError(e: Error): void {
         const outQueue: string[] = [];
         await initLANG();
 
+        // 初始化 IndexedDB
         KL_INDEXED_DB.init(
             getKlIndexedDbName(),
             KL_INDEXED_DB_STORES,
@@ -44,11 +46,13 @@ function showInitError(e: Error): void {
             outQueue.push(LANG('file-storage-cant-access'));
         }
 
+        // 创建恢复管理器
         const klRecoveryManager: KlRecoveryManager | undefined = KL_INDEXED_DB.getIsAvailable()
             ? new KlRecoveryManager({})
             : undefined;
         let project: TKlProject | undefined = undefined;
         try {
+            // 尝试从恢复管理器中获取项目
             const readResult: TDeserializedKlStorageProject | undefined = klRecoveryManager
                 ? await klRecoveryManager.getRecovery()
                 : undefined;
@@ -63,13 +67,16 @@ function showInitError(e: Error): void {
             outQueue.push(LANG('tab-recovery-failed-to-recover'));
         }
 
+         // 移除加载屏幕
         // in case an extension manipulated the page
         const loadingScreenEl = document.getElementById('loading-screen');
         loadingScreenEl?.remove();
 
+        // 创建KlApp实例
         const klApp = new KlApp({ project, klRecoveryManager });
         document.body.append(klApp.getElement());
 
+        // 显示输出队列中的消息
         setTimeout(() => {
             outQueue.forEach((msg) => {
                 klApp.out(msg);
