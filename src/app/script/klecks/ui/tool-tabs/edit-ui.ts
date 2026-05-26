@@ -63,6 +63,7 @@ export class EditUi {
             throw new Error('filters not loaded');
         }
 
+        // 检查 WebGL 支持，某些滤镜需要 WebGL，如果不支持则禁用这些滤镜并显示提示信息
         const hasWebGL: boolean = this.testHasWebGL();
 
         if (!hasWebGL) {
@@ -100,6 +101,7 @@ This has been reported to Google.
             };
         }
 
+        // 生成操作类按钮
         const createButton = (filterKey: string): HTMLElement => {
             const filter = filters[filterKey];
 
@@ -377,11 +379,11 @@ This has been reported to Google.
 
             this.rootEl.append(copyBtn, pasteBtn, BB.el({ className: 'grid-hr' }));
         }
-        addGroup(groupA);
+        addGroup(groupA); // 编辑类按钮第一组
         this.rootEl.append(BB.el({ className: 'grid-hr' }));
-        addGroup(groupB);
+        addGroup(groupB); // 编辑类按钮第二组
         this.rootEl.append(BB.el({ className: 'grid-hr' }));
-        addGroup(groupC);
+        addGroup(groupC); // 编辑类按钮第三组
 
         this.isInit = true;
     }

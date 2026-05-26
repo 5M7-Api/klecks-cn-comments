@@ -641,6 +641,7 @@ export class KlApp {
         });
 
         let isFirstTransform = true;
+        // 左侧画板区域
         this.easel = new Easel({
             width: Math.max(0, this.uiWidth - this.toolWidth),
             height: this.uiHeight,
@@ -784,6 +785,7 @@ export class KlApp {
             left: '0',
             top: '0',
         });
+        // 画板实时更新系统
         this.easelProjectUpdater = new EaselProjectUpdater({
             klCanvas: this.klCanvas,
             easel: this.easel,
@@ -1146,6 +1148,7 @@ export class KlApp {
             this.mobileUi.getElement(),
         ]);
 
+        // 右侧顶部工具栏，包含logo、文件操作、帮助等
         if (this.embed) {
             this.toolspaceTopRow = new EmbedToolspaceTopRow({
                 onHelp: () => {
@@ -1244,6 +1247,7 @@ export class KlApp {
         this.toolspaceTopRow.getElement().style.marginBottom = '10px';
         this.toolspaceInner.append(this.toolspaceTopRow.getElement());
 
+        // 右侧第二列的工具栏，画笔/拖拽/缩放/重做
         this.toolspaceToolRow = new KL.ToolspaceToolRow({
             onActivate: (activeStr) => {
                 if (activeStr !== 'hand') {
@@ -1309,6 +1313,7 @@ export class KlApp {
             this.mobileColorUi.setIsEyedropping(false);
         };
 
+        // 颜色选择器（仅选择器）
         this.klColorSlider = new KL.KlColorSlider({
             width: 250,
             height: 30,
@@ -1367,6 +1372,8 @@ export class KlApp {
                 alignItems: 'flex-end',
             },
         });
+
+        // 抖动修正元素组件
         const toolspaceStabilizerRow = new KL.ToolspaceStabilizerRow({
             smoothing: 1,
             onSelect: (v) => {
@@ -1381,6 +1388,7 @@ export class KlApp {
             toolspaceStabilizerRow.getElement(),
         ]);
 
+        // 右侧最底部的工具栏tab，包含画笔、橡皮擦等选项（本质上就是各种笔刷的不同实例）
         const brushTabRow = new KL.TabRow({
             initialId: 'penBrush',
             useAccent: true,
@@ -1426,6 +1434,7 @@ export class KlApp {
             ...Object.entries(KL.BRUSHES_UI).map(([b]) => brushUiMap[b].getElement()),
         ]);
 
+        // 拖拽滚动页面的组件
         const handUi = new KL.HandUi({
             scale: this.easel.getTransform().scale,
             angleDeg: 0,
@@ -1443,23 +1452,28 @@ export class KlApp {
             },
         });
 
+        // 填充工具的组件
         const fillUi = new KL.FillUi({
             colorSlider: this.klColorSlider,
         });
 
+        // 渐变工具组件
         const gradientUi = new KL.GradientUi({
             colorSlider: this.klColorSlider,
         });
 
+        // 文本输入工具组件
         const textUi = new KL.TextUi({
             colorSlider: this.klColorSlider,
         });
 
+        // 形状工具组件
         const shapeUi = new KL.ShapeUi({
             colorSlider: this.klColorSlider,
             onChangePanning: (doPan) => easelShape.setPanning(doPan),
         });
 
+        // 渐变工具组件
         const gradientTool = new KL.GradientTool({
             onGradient: (isDone, x1, y1, x2, y2, angleRad) => {
                 const layerIndex = currentLayer.index;
@@ -1498,6 +1512,7 @@ export class KlApp {
             },
         });
 
+        // 形状工具组件
         const shapeTool = new KL.ShapeTool({
             onShape: (isDone, x1, y1, x2, y2, angleRad) => {
                 const layerIndex = currentLayer.index;
@@ -1547,9 +1562,11 @@ export class KlApp {
             },
         });
 
+        // 图层选项的UI组件
         this.layersUi = new KL.LayersUi({
             klCanvas: this.klCanvas,
             onSelect: (layerIndex, pushHistory) => {
+                console.log('layersUi onSelect', layerIndex, pushHistory); // debug
                 const activeLayer = this.klCanvas.getLayer(layerIndex);
                 setCurrentLayer(activeLayer);
 
@@ -1583,6 +1600,7 @@ export class KlApp {
         this.layerPreview.setIsVisible(this.uiHeight >= 579);
         this.layerPreview.setLayer(currentLayer);
 
+        // 编辑选项的UI界面(按钮)
         const editUi = new KL.EditUi({
             klRootEl: this.rootEl,
             klColorSlider: this.klColorSlider,
@@ -1805,6 +1823,7 @@ export class KlApp {
             closeLoader?.();
         };
 
+        // 文件选项的操作面板
         const fileUi = this.embed
             ? null
             : new KL.FileUi({
@@ -1867,6 +1886,7 @@ export class KlApp {
             });
         }
 
+        // 三点设置选项的操作面版
         const settingsUi = new KL.SettingsUi({
             onLeftRight: () => {
                 this.uiLayout = this.uiLayout === 'left' ? 'right' : 'left';
@@ -1879,6 +1899,7 @@ export class KlApp {
             customAbout: p.aboutEl,
         });
 
+        // 画笔、图层、文件等选项的tab组件
         mainTabRow = new KL.TabRow({
             initialId: 'brush',
             tabArr: [
@@ -2109,6 +2130,7 @@ export class KlApp {
             this.bottomBarWrapper ? this.bottomBarWrapper : undefined,
         ]);
 
+        // scroll提示组件
         this.toolspaceScroller = new KL.ToolspaceScroller({
             toolspace: this.toolspace,
             uiState: this.uiLayout,
