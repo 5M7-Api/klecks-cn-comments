@@ -117,8 +117,11 @@ export class ProjectViewport {
         };
 
         this.resFactor = this.useNativeResolution ? devicePixelRatio : 1;
+        // 实际渲染canvas方法 
         this.canvas = BB.canvas(this.width * this.resFactor, this.height * this.resFactor);
+        // 获取canvas上下文
         this.ctx = BB.ctx(this.canvas);
+        // canvas的css渲染
         css(this.canvas, {
             width: this.doFillParent ? '100%' : this.width + 'px',
             height: this.doFillParent ? '100%' : this.height + 'px',
@@ -168,6 +171,7 @@ export class ProjectViewport {
                   scaleY: fixScale(transform.scale, this.project.height),
                   angleDeg: transform.angleDeg,
               };
+        // 对canvas做变换的实际函数
         const renderedMat = createMatrixFromTransform(renderedTransform);
 
         this.ctx.save();

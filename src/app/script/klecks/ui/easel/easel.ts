@@ -306,7 +306,7 @@ export class Easel<GToolId extends string> {
         this.onTransformChange = p.onTransformChange;
         this.onUndo = p.onUndo;
         this.onRedo = p.onRedo;
-
+        // 传入对应画布操作的键位（旋转、放大、吸色等快捷键操作）
         this.tempTools = Object.fromEntries(
             TEMP_TRIGGERS.map((trigger) => {
                 return [
@@ -319,7 +319,7 @@ export class Easel<GToolId extends string> {
                 ];
             }),
         ) as Record<TEaselToolTrigger, GToolId | undefined>;
-
+        // 构造好的canvas实例挂载到this.vieport上
         this.viewport = new ProjectViewport({
             width: this.width,
             height: this.height,
@@ -334,8 +334,10 @@ export class Easel<GToolId extends string> {
                 tool.renderAfterViewport?.(ctx, renderedTransform);
             },
         });
-
+        // 实例化的tools工具参数
         Object.values<TEaselTool>(this.toolsMap).forEach((tool) => {
+            //每个 Tool（画笔、橡皮、手型工具等）构造时都不知道自己在哪个 Easel 里。
+            // 这一步把一个受控接口注入给所有 Tool，让它们能反向操作 Easel（比如请求重绘、修改光标样式、读取当前变换），但不能乱访问 Easel 内部状态。
             tool.setEaselInterface?.(this.easelInterface);
             tool.onResize?.(this.width, this.height);
         });
@@ -344,6 +346,8 @@ export class Easel<GToolId extends string> {
         let mouseRightIsDown = false;
 
         let angleIsExtraSticky = false;
+        // 在原始 PointerEvent 到达 Tool 之前，先过一道手势识别。
+        // 双指捏合会在这里被拦截，计算出新的 scale/angle 后直接更新 targetTransform，不会传给 Tool。只有普通单指事件才通过 onChainOut 流向 getActiveTool().onPointer(e)。
         this.pointerPreprocessor = new EaselPointerPreprocessor({
             onUndo: this.onUndo,
             onRedo: this.onRedo,
@@ -464,6 +468,8 @@ export class Easel<GToolId extends string> {
             },
         });*/
 
+        // 把事件监听真正挂到 canvas 元素上。注意 target 是 viewport.getElement()（canvas 本身），不是 rootEl。
+        // 这样事件的命中区域就是画布区域，和渲染区域完全一致。
         this.pointerListener = new PointerListener({
             target: this.viewport.getElement(),
             onPointer: (e) => {
@@ -482,6 +488,7 @@ export class Easel<GToolId extends string> {
             maxPointers: 3, // 3 fingers needed for redo gesture
         });
 
+        // 专门处理"点击画布外部"的情况。比如文字工具在编辑状态，用户点了工具栏，工具需要知道这件事并退出编辑。
         this.windowPointerListener = (e: PointerEvent) => {
             if (this.isFrozen) {
                 return;
@@ -492,6 +499,10 @@ export class Easel<GToolId extends string> {
         };
         window.addEventListener('pointerdown', this.windowPointerListener);
 
+        // new KeyListener — 监听键盘，处理三类按键：
+        // + / -：缩放画布（this.scale(...)）
+        // 方向键：平移画布（this.translate(...)），但如果当前工具自己处理了方向键（onArrowKeys 返回 true），就不平移
+        // 特殊触发键（比如 Space）：按下时 pushTempTool 切到临时工具（如手型），松开时 popTempTool 还原。这就是"按住空格变成手型工具，松开回到画笔"的实现
         this.keyListener = new KeyListener({
             onDown: (keyStr, e, comboStr, isRepeat) => {
                 if (this.isFrozen) {
@@ -575,6 +586,8 @@ export class Easel<GToolId extends string> {
         });
         this.easelInterface.keyListener = this.keyListener;
 
+        // 创建选区虚线框的渲染器。选区（MultiPolygon）是一个纯数据结构，这个类负责把它画成你看到的那圈蚂蚁线。
+        // 它是独立的渲染逻辑，和画笔/图层渲染分开。
         this.selectionRenderer = new SelectionRenderer({
             transform: this.viewport.getTransform(),
             selection: this.project.selection,
@@ -582,6 +595,10 @@ export class Easel<GToolId extends string> {
             height: this.height,
         });
 
+        //this.svgEl — 创建一个全尺寸 SVG 元素，position: absolute 叠在 canvas 上方，pointerEvents: none 让鼠标事件穿透它不被拦截。里面塞了两类东西：
+
+        // selectionRenderer.getElement()：选区虚线框
+        // 每个 Tool 的 getSvgElement()：比如 EaselBrush 返回的是笔刷圆形光标
         this.svgEl = BB.createSvg({
             elementType: 'svg',
             width: '' + this.width,
@@ -597,6 +614,10 @@ export class Easel<GToolId extends string> {
             this.selectionRenderer.getElement(),
             ...Object.values<TEaselTool>(this.toolsMap).map((item) => item.getSvgElement()),
         );
+
+        // this.htmlOverlayEl — 同样是 position: absolute 的覆盖层，但用 HTML 元素而不是 SVG。
+        // 某些工具需要 HTML 交互元素（比如文字工具的输入框），放这里。
+        // 不是所有工具都有，所以用 filter(item !== undefined) 过滤掉没有的。
         this.htmlOverlayEl = BB.el({
             css: {
                 position: 'absolute',
@@ -609,8 +630,12 @@ export class Easel<GToolId extends string> {
                 .map((item) => item.getHtmlOverlayElement?.() || undefined)
                 .filter((item) => item !== undefined),
         );
+        // 把当前激活工具之外的所有工具的 SVG 元素设为 display: none。
+        // 因为所有工具的 SVG 都已经加进去了，但同一时间只有一个工具在用，其他的要隐藏。
         this.updateToolSvgs();
 
+        // 组装html结构，根节点是 this.rootEl，
+        // 里面有 canvas（this.viewport.getElement()）、svg（this.svgEl）和 htmlOverlay（this.htmlOverlayEl）
         this.rootEl = c(
             {
                 css: {
@@ -643,8 +668,10 @@ export class Easel<GToolId extends string> {
             return false;
         });
 
+        // activate方法通知工具类激活
         this.toolsMap[this.toolId].activate?.(this.cursorPos);
         Object.values<TEaselTool>(this.toolsMap).forEach((tool) => tool.onTool?.(this.toolId));
+        // renderLoop() 启动 rAF 循环，这个循环会永远自我驱动下去，每帧检查 doRender 标志，为 true 才调 viewport.render()。
         this.renderLoop();
     }
 
