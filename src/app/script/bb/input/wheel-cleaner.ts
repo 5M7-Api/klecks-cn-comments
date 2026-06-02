@@ -8,6 +8,7 @@ export type TWheelCleanerEvent = {
 
 const SEQUENCE_TIMEOUT_MS = 200;
 
+// ! 该类只清理了平滑滚动触控板的物理设备的数据（MacBook？）因为其派发的数据是一连串极小的、带有小数的连续值
 /**
  * Filters wheel events. removes swipe scrolling and pinch scrolling that trackpads do. (as best as it can)
  * Normalizes regular scrolls.
@@ -79,7 +80,7 @@ export class WheelCleaner {
         //prep delta
         let delta = event.deltaY;
         if ('deltaMode' in event && event.deltaMode === 1) {
-            delta *= 100 / 3;
+            delta *= 100 / 3; // 修复 Firefox 按行滚动的兼容性问题
         }
         const absDelta = Math.abs(delta);
 
@@ -113,21 +114,26 @@ export class WheelCleaner {
             //ignore zero scroll
             return;
         }
+        // 是基准的整数倍（比如用户滚得特别快，一帧合并了两个刻度）
         if (
             absDelta === this.sequenceUnit ||
             (absDelta / this.sequenceUnit) % 1 < 0.0001 // a multiple
         ) {
+            // 验证通过，是纯正的鼠标！
             //fine
         } else if ((this.sequenceUnit / absDelta) % 1 < 0.0001) {
+            // 发现之前的基准其实是个倍数，当前才是真实基准，更新它
             //unit was actually a multiple - update it
             this.sequenceUnit = absDelta;
         } else if (absDelta !== this.sequenceUnit) {
+            // 数值不规律变化了！这是触控板的惯性/滑动特征！
             //not clean - delta is varying - probably a swipe scroll or pinch scroll on trackpad
             this.sequenceUnit = null;
             this.toEmitDelta = null;
             return;
         }
 
+        // 验证通过，释放扣留的第一次数据（如果有），并发送当前数据
         if (this.toEmitDelta !== null) {
             this.emit(this.toEmitDelta);
             this.toEmitDelta = null;

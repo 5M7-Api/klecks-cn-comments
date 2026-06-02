@@ -1,5 +1,7 @@
 export const IS_FIREFOX = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
 
+// 探测当前浏览器中的事件对象（Event）使用的是“高精度时间戳”还是“传统时间戳”，并把探测结果缓存起来供全局使用。
+// 用一小时时间戳判断是网页启动的相对时间还是绝对时间戳（闭包瞬间加载判断完毕，后续只返回判断完毕的值）
 export const EVENT_USES_HIGH_RES_TIMESTAMP = (function (): () => boolean {
     const eventUsesHighResTimeStamp: boolean = new Event('').timeStamp < 1000 * 60 * 60;
     return function (): boolean {

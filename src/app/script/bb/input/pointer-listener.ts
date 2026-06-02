@@ -383,6 +383,7 @@ export class PointerListener {
             result.coalescedArr = [];
             if (correctedEvent.coalescedArr.length > 1) {
                 let coalescedItem;
+                // 因为浏览器打包的这些高频点（中间点）同样只有页面坐标，所以在这个方法里，必须遍历每一个隐藏的高频点，把它们也挨个转换成画布内部坐标
                 for (let i = 0; i < correctedEvent.coalescedArr.length; i++) {
                     coalescedItem = correctedEvent.coalescedArr[i];
                     result.coalescedArr.push({
@@ -390,6 +391,7 @@ export class PointerListener {
                         pageY: coalescedItem.pageY,
                         clientX: coalescedItem.clientX,
                         clientY: coalescedItem.clientY,
+                        // 这个方法通过读取画布在屏幕上的物理边框（getBoundingClientRect），并结合网页的滚动量（scrollLeft/Top），精准计算出了相对画布左上角的局部坐标 (relX, relY)。引擎拿到这个坐标，直接就能往对应的像素上倒墨水。
                         relX: coalescedItem.clientX - bounds.left + this.targetElement.scrollLeft,
                         relY: coalescedItem.clientY - bounds.top + this.targetElement.scrollTop,
                         dX: coalescedItem.movementX,
@@ -527,6 +529,7 @@ export class PointerListener {
                     lastPageY: correctedEvent.pageY,
                     lastTimeStamp: correctedEvent.timeStamp,
                 };
+                // ! 记录这个拖拽对象和它的 pointerId 在 dragObjArr 和 dragPointerIdArr 中，供后续使用。
                 this.dragObjArr.push(dragObj);
                 this.dragPointerIdArr.push(correctedEvent.pointerId);
 
@@ -680,7 +683,9 @@ export class PointerListener {
                 OPTIONS_PASSIVE,
             );
 
+            // 降级兼容：如果不原生支持 PointerEvents (如老旧浏览器)
             if (!HAS_POINTER_EVENTS) {
+                // 这个 helper 把旧版的 Touch 对象伪装成现代的 PointerEvent 格式
                 const touchToFakePointer = (
                     touch: Touch,
                     touchEvent: TouchEvent,
@@ -703,6 +708,7 @@ export class PointerListener {
                     };
                 };
 
+                // 拦截原生的 touchstart/move/end，翻译并转发给上面的 onPointer 体系
                 const handleTouch = (
                     e: TouchEvent,
                     type: 'start' | 'move' | 'end' | 'cancel',
@@ -726,6 +732,7 @@ export class PointerListener {
                     }
                 };
 
+                // 绑定老式 Touch 事件
                 this.onTouchStart = (e: TouchEvent): void => {
                     e.preventDefault();
                     handleTouch(e, 'start');
@@ -754,33 +761,38 @@ export class PointerListener {
                 );
             }
         }
+
+        // 绑定滚轮监听
         if (this.onWheelCallback) {
             this.onWheel = (e: WheelEvent) => {
                 if (this.wheelCleaner) {
-                    this.wheelCleaner.process(e);
+                    this.wheelCleaner.process(e); // 开启触控板和鼠标的滚轮事件校验
                 } else {
-                    finalizeWheelEvent(e);
+                    finalizeWheelEvent(e); // 直接处理
                 }
             };
             this.targetElement.addEventListener('wheel', this.onWheel, {
                 passive: !!p.isWheelPassive,
             });
         }
+
+        // 光标进出画布监听 (Hover状态)
         if (this.onEnterLeaveCallback) {
             this.onPointerEnter = (e: PointerEvent) => {
+                // Safari 在鼠标移动时有时会误报 pointerenter 事件，进行拦截
                 // workaround for Safari which can falsely fire pointerenter. For more details see below.
                 if (!pointerTypeMouseOccurred && e.pointerType === 'mouse') {
                     return;
                 }
                 this.isOverCounter++;
-                this.onEnterLeaveCallback?.(true);
+                this.onEnterLeaveCallback?.(true); // 告诉 UI 显示悬停光标
             };
 
             this.onPointerLeave = () => {
                 this.isOverCounter--;
-                this.onEnterLeaveCallback?.(false);
+                this.onEnterLeaveCallback?.(false); // 告诉 UI 隐藏悬停光标
             };
-
+            // 绑定光标进出事件
             this.targetElement.addEventListener(
                 pointerEnterEvt,
                 this.onPointerEnter,
@@ -793,6 +805,9 @@ export class PointerListener {
             );
         }
 
+        // 修复safari的一个bug问题
+        // Apple Pencil 引入了在任意文本框手写的 Scribble 功能。
+        // 绘画时这个功能可能会劫持画布的输入，阻止默认行为可以禁用该干扰。
         if (p.fixScribble) {
             //ipad scribble workaround https://developer.apple.com/forums/thread/662874
             this.onTouchMoveScribbleFix = (e: TouchEvent) => e.preventDefault();
@@ -804,6 +819,7 @@ export class PointerListener {
         }
     }
 
+    // 撤销掉所有事件监听。
     destroy(): void {
         if (this.isDestroyed) {
             return;
@@ -831,6 +847,7 @@ export class PointerListener {
     }
 }
 
+// 兼容性bug：当用户在 iPad 或 iPhone 上用手指（Touch）点击屏幕时，Safari 浏览器有时会发生错乱，错误地派发一个 pointerenter（指针进入）事件，并且荒谬地将其 pointerType（指针类型）标记为 "mouse"（鼠标）。
 // Workaround for Safari (iOS/IPadOS 26.2) https://bugs.webkit.org/show_bug.cgi?id=305856
 // The incorrect pointerenter event will be of type "mouse" although the click happened with "touch".
 // This workaround won't work if the user uses both touch and mouse. The probability of that should be low enough.
