@@ -458,6 +458,7 @@ export class PointerListener {
         // WheelCleaner 用于平滑触控板（如 Mac 触控板）的惯性滚动，除非显式禁用
         this.wheelCleaner = p.useDirtyWheel ? undefined : new WheelCleaner(finalizeWheelEvent);
 
+        // 绑定指针按下/移动/抬起事件的处理函数
         if (this.onPointerCallback) {
 
             // 画布内的指针移动（Hover 或 移动状态）事件
