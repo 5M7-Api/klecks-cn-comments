@@ -473,10 +473,19 @@ export class Easel<GToolId extends string> {
         this.pointerListener = new PointerListener({
             target: this.viewport.getElement(),
             onPointer: (e) => {
+                // console.debug('[PointerListener DEBUG] pointer event');
+                // console.dir(e);
                 this.pointerPreprocessor.chainIn(e);
             },
-            onWheel: this.onWheel,
+            // onWheel: this.onWheel,
+            onWheel: (e) => {
+                console.debug('[PointerListener DEBUG] wheel event');
+                console.dir(e)
+                return this.onWheel(e);
+            },
             onEnterLeave: (isOver) => {
+                console.debug('[PointerListener DEBUG] enter/leave event');
+                console.dir(isOver);
                 const tool = this.getActiveTool();
                 if (!isOver) {
                     this.cursorPos = undefined;

@@ -4,6 +4,7 @@ export function mix(a: number, b: number, f: number): number {
     return a * (1 - f) + b * f;
 }
 
+/** 计算两点之间的距离 */
 export function dist(ax: number, ay: number, bx: number, by: number): number {
     return Math.sqrt(Math.pow(ax - bx, 2) + Math.pow(ay - by, 2));
 }
