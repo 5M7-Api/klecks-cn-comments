@@ -19,6 +19,7 @@ export function lenSquared(x: number, y: number): number {
     return x * x + y * y;
 }
 
+/** 计算两点直线与x轴正方向的夹角（弧度） */
 export function pointsToAngleRad(p1: TVector2D, p2: TVector2D): number {
     return Math.atan2(p2.y - p1.y, p2.x - p1.x);
 }
