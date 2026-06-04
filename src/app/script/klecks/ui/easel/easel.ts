@@ -51,19 +51,35 @@ export type TEaselParams<GToolId extends string> = {
     onRedo?: () => void; // gesture triggers redo
 };
 
+
+/**
+ * 这是一个交互式的“项目视图窗口（Project Viewport）”，它同时负责渲染选区（蚂蚁线）。
+ * 你通过不同的“模式（也就是各种 Tool）”与它交互。
+ * 同一时间只能激活一个 Tool，但允许通过按键触发临时 Tool 覆盖它（比如按住空格键变成拖拽手型）。
+ */
 /**
  * An interactive project viewport, that also renders the selection. You interact with it through modes (aka tools).
  * One tool is active at a time. temp trigger can overwrite it temporarily.
  */
 export class Easel<GToolId extends string> {
+    // === 核心 DOM 节点 ===
+    // 整个画架的根节点
     private readonly rootEl: HTMLElement;
+    // 覆盖在画布上的 SVG 层，用于渲染各工具的自定义光标（如笔刷圈）
     private readonly svgEl: SVGElement; // each tool gets an element in this SVG tag, for an SVG overlay
+    // 覆盖在画布上的 HTML 层，用于交互UI（如文字输入框）
     private readonly htmlOverlayEl: HTMLElement; // each tool can get an element in this html node, for an interactive overlay
+
+    // === 核心功能模块 ===
+    // 真正的渲染引擎（处理多个 Canvas 图层组合）
     private readonly viewport: ProjectViewport;
+
     private readonly pointerPreprocessor: EaselPointerPreprocessor;
     private readonly pointerListener: PointerListener;
     private readonly windowPointerListener: (e: PointerEvent) => void;
+    // 键盘监听器：处理快捷键（缩放、工具切换等）
     private readonly keyListener: KeyListener;
+    // 选区渲染器：专门画那圈闪烁的蚂蚁线
     private readonly selectionRenderer: SelectionRenderer;
 
     // from params
@@ -82,16 +98,26 @@ export class Easel<GToolId extends string> {
     private project: TEaselProject;
     private width: number;
     private height: number;
+    // 激活的工具（笔刷）和临时工具
     private toolId: GToolId;
     private tempToolId: GToolId | undefined;
     private animationFrameId: ReturnType<typeof requestAnimationFrame> | undefined;
+    // 渲染锁：如果为 true，下一帧就会重绘。优化性能，避免无意义的空跑
     private doRender = false; // true -> will render on next renderLoop
     private cursorPos: TVector2D | undefined; // so brush cursor not top left corner after reload
     private isFrozen: boolean = false; // disable interaction with the easel whatsoever
+
+    // === 视图变换矩阵（极其核心！） ===
+    // lastRenderedTransform 记录上一帧画在屏幕上的真实状态
     private lastRenderedTransform: TViewportTransform = {} as TViewportTransform; // previously rendered viewport transformation
     private pinchInitialTransform: TViewportTransform | undefined; // when starting a pinch-to-zoom gesture
+    // targetTransform 记录用户“期望”到达的状态。比如用户鼠标滚轮滚了一下，期望放大两倍。
+    // Easel 会通过 renderLoop 里的缓动动画，让真实状态平滑过渡到 targetTransform。
     private targetTransform: TViewportTransform = {} as TViewportTransform;
 
+    // === 内部暴露给各工具的超级 API (easelInterface) ===
+    // 所有的笔刷、橡皮、油漆桶等工具，本身是个独立类。
+    // Easel 在初始化时把这个 interface 塞给它们，它们就能通过这里获取画布尺寸、修改光标、请求重绘。
     // custom interface passed to tools
     private readonly easelInterface: TEaselInterface = {
         setCursor: (cursor) => (this.rootEl.style.cursor = cursor),
@@ -114,8 +140,14 @@ export class Easel<GToolId extends string> {
         getElement: () => this.rootEl,
     };
 
+    /**
+     * 【极其核心】更新视图变换目标
+     * 当发生缩放、平移、旋转时，并不马上重绘画布！
+     * 而是更新 targetTransform，并把 doRender 设为 true。真正的绘制由 renderLoop 统一在下一帧调度。
+     */
     private setTargetTransform(transform: TViewportTransform, isImmediate?: boolean): void {
         if (isImmediate) {
+            // 如果要求立即生效（比如手势捏合时），不走缓动动画，直接强制设置给底层 viewport
             this.viewport.setTransform(transform);
         }
         this.targetTransform = transform;
@@ -140,22 +172,37 @@ export class Easel<GToolId extends string> {
 
     private lastFrameTimestamp: number = 0;
     /**
+     * 【引擎心脏】基于 requestAnimationFrame 的无限循环
+     * 这是整个 Easel 的动力源，每秒执行 60 次（取决于屏幕刷新率）。
+     */
+    /**
      * Only call once from outside. Will perpetuate itself and render when doRender = true
      */
     private renderLoop(): void {
         const now = performance.now();
         const deltaMs = now - this.lastFrameTimestamp;
         this.lastFrameTimestamp = now;
+
+        // 自己调度自己，形成死循环
         this.animationFrameId = requestAnimationFrame(() => this.renderLoop());
         if (!this.doRender) {
+            // 【性能优化】如果没有发生任何需要更新的动作（鼠标没动、没按笔、没缩放），直接跳过！绝不浪费 CPU/GPU。
             return;
         }
         const tool = this.getActiveTool();
+        // 当前屏幕上真实的变换状态
         const oldTransform = this.viewport.getTransform();
         let newTransform = oldTransform;
+
+
         if (isTransformEqual(oldTransform, this.targetTransform)) {
+            // 如果当前的真实状态，已经无限接近用户期望的状态，那就停止渲染。
             this.doRender = false;
         } else {
+            // 【丝滑缓动计算】
+            // 如果用户滚了一下鼠标滚轮（targetTransform 瞬间变大），画面不能“啪”地一下变大，会很突兀。
+            // 这里根据刷新时间差 (deltaMs) 计算出一个插值因子，让 oldTransform 向 targetTransform 平滑地过渡一点点。
+            // 这就是你觉得界面缩放特别“有弹性、很高级”的秘密。
             const defaultDeltaMs = 1000 / 60;
             const timeFactor = deltaMs / defaultDeltaMs;
             const easeFactor = 1 - 0.7 ** timeFactor;
@@ -167,12 +214,14 @@ export class Easel<GToolId extends string> {
                     width: this.project.width,
                     height: this.project.height,
                 },
+                // 以屏幕中心为缓动基准
                 {
                     x: this.width / 2,
                     y: this.height / 2,
                 },
                 easeFactor,
             );
+            // 把平滑过渡了一点点的新矩阵，喂给底层引擎
             this.viewport.setTransform(newTransform);
         }
 
@@ -185,8 +234,10 @@ export class Easel<GToolId extends string> {
             newTransform.scale !== this.lastRenderedTransform.scale ||
             newTransform.angleDeg !== this.lastRenderedTransform.angleDeg;
 
+        // 【触发底层重绘】如果矩阵发生变化，或者画笔留下了一道墨水，这里会真正把像素画到 <canvas> 标签上。
         this.viewport.render(!isTransformEqual(oldTransform, newTransform));
         if (isPositionChanged || isScaleOrAngleChanged) {
+            // 如果画布矩阵变了，通知当前使用的工具（比如有特殊需求的网格工具）和选区蚂蚁线跟着一起动。
             tool.onUpdateTransform?.(newTransform);
             this.selectionRenderer.setTransform(newTransform);
             this.onTransformChange(this.targetTransform, isScaleOrAngleChanged);
@@ -206,10 +257,12 @@ export class Easel<GToolId extends string> {
             return;
         }
 
+        // 激活临时工具，并告诉其他所有工具：“我现在变成手型工具啦！”
         this.tempToolId = toolId;
         const activeToolId = this.getActiveToolId();
         this.toolsMap[activeToolId].activate?.(this.cursorPos);
         Object.values<TEaselTool>(this.toolsMap).forEach((tool) => tool.onTool?.(activeToolId));
+        // 切换光标 SVG
         this.updateToolSvgs();
         this.updateDoubleTapPointerTypes();
     }
@@ -306,7 +359,7 @@ export class Easel<GToolId extends string> {
         this.onTransformChange = p.onTransformChange;
         this.onUndo = p.onUndo;
         this.onRedo = p.onRedo;
-        // 传入对应画布操作的键位（旋转、放大、吸色等快捷键操作）
+        // 传入对应画布临时工具操作的键位（旋转、放大、吸色等快捷键操作）
         this.tempTools = Object.fromEntries(
             TEMP_TRIGGERS.map((trigger) => {
                 return [
@@ -381,6 +434,9 @@ export class Easel<GToolId extends string> {
                     metaTransform.viewportP.y += event.relY - event.downRelY;
                     metaTransform.angleDeg = newAngleDeg;
 
+                    // 【直接修改视图】
+                    // 双指捏合的结果，直接在此处被转化为画架的平移、缩放指令！
+                    // 这些事件在这里就被“消费”了，绝不会通过 `onChainOut` 传给下面的画笔工具，所以画布不会留下黑点。
                     this.setTargetTransform(
                         createTransform(
                             metaTransform.viewportP,
@@ -407,6 +463,7 @@ export class Easel<GToolId extends string> {
                     x: e.relX,
                     y: e.relY,
                 };
+                // 处理鼠标的快捷键事件
                 if (e.type === 'pointerdown') {
                     if (e.button === 'middle') {
                         mouseMiddleIsDown = true;
@@ -432,6 +489,7 @@ export class Easel<GToolId extends string> {
                         return;
                     }
                 }
+                // ! 这里才是真正绘画的pointer事件被放行出去
                 this.getActiveTool().onPointer(e);
             },
         });
@@ -475,6 +533,7 @@ export class Easel<GToolId extends string> {
             onPointer: (e) => {
                 // console.debug('[PointerListener DEBUG] pointer event');
                 // console.dir(e);
+                // ! 这里已经经过了预处理后，绘画的事件过来了！
                 this.pointerPreprocessor.chainIn(e);
             },
             // onWheel: this.onWheel,
@@ -605,7 +664,6 @@ export class Easel<GToolId extends string> {
         });
 
         //this.svgEl — 创建一个全尺寸 SVG 元素，position: absolute 叠在 canvas 上方，pointerEvents: none 让鼠标事件穿透它不被拦截。里面塞了两类东西：
-
         // selectionRenderer.getElement()：选区虚线框
         // 每个 Tool 的 getSvgElement()：比如 EaselBrush 返回的是笔刷圆形光标
         this.svgEl = BB.createSvg({
@@ -617,10 +675,14 @@ export class Easel<GToolId extends string> {
             position: 'absolute',
             left: '0',
             top: '0',
+            // 【极其关键】：让这个 SVG 层变成“幽灵”，鼠标点击会直接穿透它，打在下面的 Canvas 上
             pointerEvents: 'none',
         });
+        // 把所有的矢量附属物塞进这个 SVG 层：
         this.svgEl.append(
+            // 1. 选区渲染器（蚂蚁线）
             this.selectionRenderer.getElement(),
+            // 2. 遍历所有注册的工具（画笔、橡皮等），把它们自定义的光标 SVG 都拿过来
             ...Object.values<TEaselTool>(this.toolsMap).map((item) => item.getSvgElement()),
         );
 
@@ -634,10 +696,11 @@ export class Easel<GToolId extends string> {
                 top: '0',
             },
         });
+        // 遍历所有工具，看看哪个工具需要 HTML 交互层，如果有就加进来
         this.htmlOverlayEl.append(
             ...Object.values<TEaselTool>(this.toolsMap)
                 .map((item) => item.getHtmlOverlayElement?.() || undefined)
-                .filter((item) => item !== undefined),
+                .filter((item) => item !== undefined), // 过滤掉那些没有 HTML 层的工具（比如普通画笔就不需要）
         );
         // 把当前激活工具之外的所有工具的 SVG 元素设为 display: none。
         // 因为所有工具的 SVG 都已经加进去了，但同一时间只有一个工具在用，其他的要隐藏。
@@ -648,14 +711,18 @@ export class Easel<GToolId extends string> {
         this.rootEl = c(
             {
                 css: {
-                    userSelect: 'none',
-                    touchAction: 'none',
-                    overscrollBehaviorX: 'none',
+                    // 【关键防御】：禁止浏览器默认的触摸/拖拽行为干扰绘图
+                    userSelect: 'none',  // 禁止双击选中文本
+                    touchAction: 'none',  // 告诉浏览器：“这块区域的触摸我自己处理，你不要试图滚动页面！”（解决触摸屏画画时页面跟着滚的问题）
+                    overscrollBehaviorX: 'none',  // 防止 Mac 触控板左右滑动触发浏览器的“前进/后退”手势
                 },
             },
+            // 底层/中层/顶层
             [this.viewport.getElement(), this.svgEl, this.htmlOverlayEl],
         );
 
+        // 屏蔽右键菜单
+        // 用户用触控笔按侧键，或者用鼠标右键平移画布时，不能弹出浏览器的右键菜单！
         // prevent contextmenu
         this.rootEl.addEventListener(
             'contextmenu',
@@ -666,11 +733,17 @@ export class Easel<GToolId extends string> {
             { passive: false },
         );
 
+        // 屏蔽移动端的触摸结束默认行为
+        // 作者注释说“继承自老代码，不知道删了会坏什么”。这在前端老项目中很常见。
+        // 实际上这通常是为了防止 iOS Safari 在 touchend 时触发各种奇怪的 300ms 延迟点击或滚动回弹。
         // Carried over from old KlCanvasWorkspace. Prevent some default browser behavior. Todo what breaks if removed?
         this.rootEl.addEventListener('touchend', (e) => {
             e.preventDefault();
             return false;
         });
+
+        // 屏蔽拖拽事件
+        // 防止用户一不小心把画布里的某些隐藏元素当作图片给“拖拽”出来了（比如出现一个半透明的拖拽残影）。
         // Carried over from old KlCanvasWorkspace. Prevent some default browser behavior. Todo what breaks if removed?
         this.rootEl.addEventListener('dragstart', (e) => {
             e.preventDefault();
