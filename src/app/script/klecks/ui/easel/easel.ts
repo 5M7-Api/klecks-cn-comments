@@ -154,6 +154,9 @@ export class Easel<GToolId extends string> {
         this.doRender = true;
     }
 
+    /**
+     * 选择是否让预先存在的工具图标要素·渲染出来
+     */
     private updateToolSvgs(): void {
         const tool = this.tempToolId ?? this.toolId;
         Object.keys(this.toolsMap).forEach((toolId) => {
