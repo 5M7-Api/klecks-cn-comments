@@ -312,36 +312,65 @@ export class Easel<GToolId extends string> {
     }
 
     private readonly onWheel = (e: TWheelEvent): void => {
+        // 阻止浏览器默认行为（比如页面上下滚动、Mac 触控板的双指前进后退等）
         e.event?.preventDefault();
+
+        // isImmediate 决定了这次缩放是“瞬间完成（无动画）”还是“平滑过渡（有动画）”
         let isImmediate = false;
+        // 【硬件兼容 1：触控板微小偏移】
+        // Math.abs(e.deltaY) < 0.8 通常意味着这是 Mac 触控板发出的极其高频、微小的滚动事件。
+        // 因为它触发频率极高，如果加上平滑动画反而会导致画面卡顿和滞后，所以直接设为立即执行。
         if (Math.abs(e.deltaY) < 0.8) {
             isImmediate = true;
         }
+
+        // 【硬件兼容 2：触控板的“伪装 Ctrl”捏合手势】
+        // 这是一个极其经典的黑科技！
+        // 浏览器为了区分“双指上下滑动（平移）”和“双指捏合（缩放）”，会在触控板发生“双指捏合”时，
+        // 强行塞一个 e.ctrlKey = true 进去，哪怕用户根本没有按键盘上的 Ctrl 键！
+        // 所以这里通过对比原生事件的 ctrlKey 和我们自己维护的键盘大管家的 ctrl 状态，来精准识别“触控板捏合手势”。
         if (e.event && e.event.ctrlKey && !this.keyListener.isPressed('ctrl')) {
             isImmediate = true;
             let factor = 1;
+            // deltaMode === 0 表示滚动值是以“像素（pixels）”为单位的（通常是触控板或平滑鼠标）
+            // 放大倍数进行补偿，让缩放手感更正常
             if (e.event.deltaMode === 0) {
                 factor = 6;
             }
             e.deltaY *= factor;
         }
+        // 【精细控制：按住 Shift 键时微调缩放】
         if (this.keyListener.isPressed('shift')) {
             e.deltaY /= 4;
         }
 
+        // 获取当前的画布变换状态（x, y平移量，缩放比例，旋转角度）
         // zoom
         const transform = this.targetTransform;
+        // viewportPoint: 鼠标在“屏幕（浏览器容器）”上的绝对物理坐标（比如屏幕中心 400, 300）
         const viewportPoint = {
             x: e.relX,
             y: e.relY,
         };
+        // 把当前的变换状态转换为一个 2D 仿射变换矩阵
         const mat = createMatrixFromTransform(transform);
+        // 【最核心的一步：空间逆向映射】
+        // 我们知道鼠标点在屏幕的 (400, 300) 处，但由于画布可能已经被放大、平移、旋转过了，
+        // 我们必须反向推算出：屏幕上的 (400, 300) 这个点，到底对应着底层画纸上的第几个像素？
+        // inverse(mat) 求出逆矩阵，然后将屏幕坐标反算成画纸坐标 (canvasPoint)。
         const canvasPoint = applyToPoint(inverse(mat), viewportPoint);
+        // 计算新的缩放比例
+        // 这里使用了指数函数 Math.pow，确保无论当前是在放大 10 倍还是缩小 0.1 倍的状态下，
+        // 滚轮滚一格带来的“视觉感受”是一致的。并且用 BB.clamp 限制了最大/最小缩放倍数。
         const newScale = BB.clamp(
             transform.scale * Math.pow(1 + 4 / 10, -e.deltaY),
             EASEL_MIN_SCALE,
             EASEL_MAX_SCALE,
         );
+        // 生成新的变换矩阵，并提交更新！
+        // createTransform 内部会做一个复杂的运算：
+        // “请重新计算画布的 x 和 y 平移量，确保在 newScale（新缩放比例）和原角度下，
+        // 画纸上的 canvasPoint 依然死死地对准屏幕上的 viewportPoint！”
         this.setTargetTransform(
             createTransform(viewportPoint, canvasPoint, newScale, transform.angleDeg),
             isImmediate,
@@ -567,7 +596,7 @@ export class Easel<GToolId extends string> {
         };
         window.addEventListener('pointerdown', this.windowPointerListener);
 
-        // new KeyListener — 监听键盘，处理三类按键：
+        // 监听键盘，处理三类按键：
         // + / -：缩放画布（this.scale(...)）
         // 方向键：平移画布（this.translate(...)），但如果当前工具自己处理了方向键（onArrowKeys 返回 true），就不平移
         // 特殊触发键（比如 Space）：按下时 pushTempTool 切到临时工具（如手型），松开时 popTempTool 还原。这就是"按住空格变成手型工具，松开回到画笔"的实现
