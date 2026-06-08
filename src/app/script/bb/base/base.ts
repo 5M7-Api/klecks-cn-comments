@@ -34,6 +34,7 @@ export function asyncLoadImage(src: string): Promise<HTMLImageElement> {
     });
 }
 
+// 用来批量设置dom样式的
 export function css(el: HTMLElement | SVGElement, styleObj: Partial<CSSStyleDeclaration>): void {
     const elStyle: any = el.style;
     Object.keys(styleObj).forEach((key) => {

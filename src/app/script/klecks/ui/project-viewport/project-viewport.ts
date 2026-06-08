@@ -170,6 +170,7 @@ export class ProjectViewport {
         });
         window.addEventListener('resize', this.resizeListener);
 
+        // 构造透明方块格
         this.pattern = throwIfNull(
             // Exception: InvalidStateError: The object is in an invalid state.
             this.ctx.createPattern(BB.createCheckerCanvas(10, THEME.isDark()), 'repeat'),

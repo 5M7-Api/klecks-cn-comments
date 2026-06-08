@@ -197,6 +197,7 @@ export function drawTransformedImageOnCanvas(
     ctx.restore();
 }
 
+/** 生成一个棋盘格 */
 export const createCheckerCanvas = function (size: number, isDark?: boolean): HTMLCanvasElement {
     const canvas = createCanvas();
     let ctx;
