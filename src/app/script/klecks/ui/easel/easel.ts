@@ -209,7 +209,7 @@ export class Easel<GToolId extends string> {
             const defaultDeltaMs = 1000 / 60;
             const timeFactor = deltaMs / defaultDeltaMs;
             const easeFactor = 1 - 0.7 ** timeFactor;
-
+             // 用于优化一个直线的过渡路径
             newTransform = blendTransform(
                 oldTransform,
                 this.targetTransform,
