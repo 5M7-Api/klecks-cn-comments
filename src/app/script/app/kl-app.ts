@@ -335,7 +335,7 @@ export class KlApp {
             });
         }
 
-        // 画布初始化
+        // 实际的绘画数据内容
         this.klCanvas = new KL.KlCanvas(this.klHistory, this.embed ? -1 : 1);
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;

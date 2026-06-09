@@ -134,6 +134,7 @@ export class SelectionRenderer {
 
     // ----------------------------------- public -----------------------------------
     constructor(p: TSelectionRendererParams) {
+
         this.viewportTransform = p.transform;
         // 提前把 transform 转成矩阵，后续 update() 直接复用
         this.viewportMat = createMatrixFromTransform(this.viewportTransform);
@@ -180,6 +181,10 @@ export class SelectionRenderer {
      * 不立即重渲染，等预览结束后自然生效，避免闪烁。
      */
     setSelection(selection?: MultiPolygon): void {
+        // debug
+        console.log('SelectionRenderer 真实选区更新: ' );
+        console.dir(selection);
+
         if (this.selection === selection) {
             // 引用相同，数据没变，跳过
             return;
@@ -201,6 +206,10 @@ export class SelectionRenderer {
      */
     // overwrite project selection
     setRenderedSelection(renderedSelection?: MultiPolygon, isImmediate?: boolean): void {
+        // debug
+        console.log('SelectionRenderer 预览选区更新: ' );
+        console.dir(renderedSelection);
+
         if (this.renderedSelection === renderedSelection) {
             return;
         }

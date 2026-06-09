@@ -570,13 +570,13 @@ export class Easel<GToolId extends string> {
             },
             // onWheel: this.onWheel,
             onWheel: (e) => {
-                console.debug('[PointerListener DEBUG] wheel event');
-                console.dir(e)
+                // console.debug('[PointerListener DEBUG] wheel event');
+                // console.dir(e)
                 return this.onWheel(e);
             },
             onEnterLeave: (isOver) => {
-                console.debug('[PointerListener DEBUG] enter/leave event');
-                console.dir(isOver);
+                // console.debug('[PointerListener DEBUG] enter/leave event');
+                // console.dir(isOver);
                 const tool = this.getActiveTool();
                 if (!isOver) {
                     this.cursorPos = undefined;

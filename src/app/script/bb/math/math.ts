@@ -34,6 +34,7 @@ export function isInsideRect(p: TVector2D, rect: TRect): boolean {
     );
 }
 
+/** 将一个数强制限制在一个上下限内部 */
 export function clamp(num: number, min: number, max: number): number {
     return num < min ? min : num > max ? max : num;
 }
