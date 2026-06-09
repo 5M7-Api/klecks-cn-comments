@@ -57,6 +57,10 @@ export function rotateAround(center: TVector2D, point: TVector2D, deg: number): 
     return rot;
 }
 
+/** 
+ * 角度吸附的逻辑
+ * 当用户的旋转角度接近某个预设的“标准角度”（如 15°、45°、90°）时，自动将其“吸附”到该标准角度上，从而让对齐变得更容易。
+ *  */
 export function snapAngleDeg(
     angleDeg: number,
     snapDegIncrement: number,
