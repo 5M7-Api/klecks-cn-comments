@@ -2,6 +2,7 @@ import { TViewportTransform } from '../../klecks/ui/project-viewport/project-vie
 import { TVector2D } from '../bb-types';
 import { applyToPoint, compose, rotate, scale as scaleFunc } from 'transformation-matrix';
 
+/** 根据给定的视口点和画布点，计算变换矩阵 */
 export function createTransform(
     viewportPoint: TVector2D,
     canvasPoint: TVector2D,

@@ -590,6 +590,7 @@ export class Easel<GToolId extends string> {
 
         // 专门处理"点击画布外部"的情况。比如文字工具在编辑状态，用户点了工具栏，工具需要知道这件事并退出编辑。
         this.windowPointerListener = (e: PointerEvent) => {
+            console.log('[WindowPointerListener DEBUG] pointer event traggered: ', e)
             if (this.isFrozen) {
                 return;
             }
