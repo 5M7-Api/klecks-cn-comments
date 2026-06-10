@@ -22,6 +22,8 @@ export function blendTransform(
     viewportCenter: TVector2D,
     easeFactor: number,
 ): TViewportTransform {
+    // console.log('blendTransform: currentTransform', currentTransform);
+    // console.log('blendTransform: targetTransform', targetTransform);
     // ==========================================
     // 策略 1：完全相等（性能优化）
     // ==========================================

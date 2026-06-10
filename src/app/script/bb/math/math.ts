@@ -1,5 +1,6 @@
 import { TBoundsType, TCoordinateBounds, TIndexBounds, TRect, TVector2D } from '../bb-types';
 
+/** 线性插值计算 */
 export function mix(a: number, b: number, f: number): number {
     return a * (1 - f) + b * f;
 }

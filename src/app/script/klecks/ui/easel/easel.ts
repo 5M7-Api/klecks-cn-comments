@@ -590,7 +590,7 @@ export class Easel<GToolId extends string> {
 
         // 专门处理"点击画布外部"的情况。比如文字工具在编辑状态，用户点了工具栏，工具需要知道这件事并退出编辑。
         this.windowPointerListener = (e: PointerEvent) => {
-            console.log('[WindowPointerListener DEBUG] pointer event traggered: ', e)
+            // console.log('[WindowPointerListener DEBUG] pointer event traggered: ', e)
             if (this.isFrozen) {
                 return;
             }
@@ -920,6 +920,10 @@ export class Easel<GToolId extends string> {
         return true;
     }
 
+    /**
+     * 智能判断什么是最佳的复位方式。
+     * 例如：如果这是一幅超小尺寸的像素画（Pixel Art），放大适配屏幕（Fit）会比 100% 原始大小更好。
+     */
     /**
      * Automatically decide what is best. E.g. if it's pixel art, Fit might be better.
      */
