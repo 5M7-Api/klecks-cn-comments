@@ -259,8 +259,8 @@ export class KlApp {
             this.embed
                 ? 'left'
                 : LocalStorage.getItem('uiState')
-                  ? LocalStorage.getItem('uiState')
-                  : 'right'
+                    ? LocalStorage.getItem('uiState')
+                    : 'right'
         ) as TUiLayout;
 
         // 存储系统初始化
@@ -412,6 +412,7 @@ export class KlApp {
             },
         });
 
+        // drawEventChain这个类的构造决定了笔触的曲线平滑化和去除杂点
         const lineSmoothing = new LineSmoothing({
             smoothing: translateSmoothing(1),
         });
@@ -422,26 +423,66 @@ export class KlApp {
         });
 
         // 画笔事件链条
-        //用户的鼠标移动事件 -> 经过滤波器 (LineSanitizer) -> 经过平滑处理 (LineSmoothing) -> 最终由当前选中的画笔工具 (currentBrushUi) 执行绘制。
+        // ====================================================================================
+        // 【终点站：渲染管线出口 (Render Pipeline Exit)】
+        // 此处的 event 已经历经千锤百炼：
+        // 1. 经过了 CoalescedExploder（找回了被浏览器吃掉的高频历史坐标点）
+        // 2. 经过了 LineSanitizer（过滤了硬件故障导致的坐标突变、原地重叠点）
+        // 3. 经过了 LineSmoothing（数学插值平滑，去除了人类手腕造成的机械抖动）
+        // 现在的它，是一个完美、纯净的 TDrawEvent，准备直接驱动底层画笔绘制。
+        // ====================================================================================
         drawEventChain.setChainOut(((event: TDrawEvent) => {
+            // -----------------------------------------------------------
+            // 阶段一：落笔 (Pointer Down) - 绘画动作的开端
+            // -----------------------------------------------------------  
             if (event.type === 'down') {
+                // 【防御性 UX 设计】屏蔽周围 UI 的事件响应
+                // 作用：画师在挥舞数位笔画长线时，极易划出画布区域碰到旁边的工具栏。
+                // 设置为 'none' 可以让画笔在划过工具栏上方时，依然保持作画状态，而不会意外触发 UI 按钮。
                 this.toolspace.style.pointerEvents = 'none';
+                // 【下发布署】唤醒具体的笔刷 UI 控制器（如铅笔、水彩引擎）
+                // 传入起始坐标与初段压感，让底层引擎准备好笔刷的“墨水量”、“毛发状态”等。
                 currentBrushUi.startLine(event.x, event.y, event.pressure);
+                // 【状态锚记】在主工具箱中持久化记录这个点
+                // 极其重要：这是为了后续按住 Shift 键触发“连点成直线”功能提供起点参照。
                 this.easelBrush.setLastDrawEvent({ x: event.x, y: event.y });
+                // 【帧率保护】向画布(Easel)发送“脏(Dirty)”标记请求重绘
+                // 不直接同步渲染，而是交给 requestAnimationFrame 统一收集调度，防止掉帧卡顿。
                 this.easel.requestRender();
             }
+            // -----------------------------------------------------------
+            // 阶段二：运笔 (Pointer Move) - 核心喷墨循环
+            // -----------------------------------------------------------
             if (event.type === 'move') {
+                // 【持续输出】将每一帧的微小位移和实时压感传递给画笔引擎。
+                // 注意：这里透传了 event.isCoalesced。
+                // 这是对底层笔刷引擎的暗示：“这是一个非常密集的高频历史点，你只需要把墨水喷上去，
+                // 绝对不要去更新界面的画笔悬浮光标DOM，因为肉眼看不见中间过程，更新DOM只会卡死浏览器！”
                 currentBrushUi.goLine(event.x, event.y, event.pressure, event.isCoalesced);
+                // 随着鼠标移动，不断刷新最后停留的位置
                 this.easelBrush.setLastDrawEvent({ x: event.x, y: event.y });
                 this.easel.requestRender();
             }
+            // -----------------------------------------------------------
+            // 阶段三：离笔 (Pointer Up) - 动作的收尾与清洁
+            // -----------------------------------------------------------
             if (event.type === 'up') {
+                // 【解除封印】画笔离开屏幕，立刻恢复周围 UI (如图层面板、颜色选择器) 的交互能力。
                 this.toolspace.style.pointerEvents = '';
+                // 【物理收尾】通知底层画笔完成这一笔的生命周期。
+                // 有些高级笔刷在抬笔瞬间会有特殊结算（比如：油画颜料的收锋、水彩向四周缓慢晕染的最后结算）。
                 currentBrushUi.endLine();
                 this.easel.requestRender();
             }
+            // -----------------------------------------------------------
+            // 阶段四：绝对直线 (Shift + Line) - 强制约束动作
+            // -----------------------------------------------------------
             if (event.type === 'line') {
+                // 【短路捷径】跳过正常的 down -> move -> up 生命循环。
+                // 通常发生在用户按住 Shift 键，点击画布别处时。
+                // 直接调用底层暴露的 `drawLineSegment`，用数学公式在空间中强行抹出一条完美的直线段。
                 currentBrushUi.getBrush().drawLineSegment(event.x0, event.y0, event.x1, event.y1);
+                // 更新直线的终点，以便用户如果不松开 Shift 键继续点击，能以刚才的终点为新起点继续连线。
                 this.easelBrush.setLastDrawEvent({ x: event.x1, y: event.y1 });
                 this.easel.requestRender();
             }
@@ -721,20 +762,20 @@ export class KlApp {
                                 angleRad: angleRad,
                                 fill: textToolSettings.fill
                                     ? {
-                                          color: {
-                                              ...this.klColorSlider.getColor(),
-                                              a: textToolSettings.fill.color.a,
-                                          },
-                                      }
+                                        color: {
+                                            ...this.klColorSlider.getColor(),
+                                            a: textToolSettings.fill.color.a,
+                                        },
+                                    }
                                     : undefined,
                                 stroke: textToolSettings.stroke
                                     ? {
-                                          ...textToolSettings.stroke,
-                                          color: {
-                                              ...this.klColorSlider.getSecondaryRGB(),
-                                              a: textToolSettings.stroke.color.a,
-                                          },
-                                      }
+                                        ...textToolSettings.stroke,
+                                        color: {
+                                            ...this.klColorSlider.getSecondaryRGB(),
+                                            a: textToolSettings.stroke.color.a,
+                                        },
+                                    }
                                     : undefined,
                             },
 
@@ -905,7 +946,7 @@ export class KlApp {
                                     setTimeout(() => {
                                         throw new Error(
                                             'keyboard-shortcut: failed to store browser storage, ' +
-                                                e,
+                                            e,
                                         );
                                     }, 0);
                                     this.statusOverlay.out(
@@ -1046,7 +1087,7 @@ export class KlApp {
                     this.klColorSlider.swapColors();
                 }
             },
-            onUp: (keyStr, event) => {},
+            onUp: (keyStr, event) => { },
         });
 
         const brushUiMap: {
@@ -1658,7 +1699,7 @@ export class KlApp {
                     this.easelProjectUpdater.update();
                     this.easel.resetOrFitTransform(true);
                 },
-                onCancel: () => {},
+                onCancel: () => { },
             });
         };
 
@@ -1668,7 +1709,7 @@ export class KlApp {
                 canvas: this.klCanvas.getCompleteCanvas(1),
                 fileName: BB.getDate() + KL_CONFIG.filenameBase + '.png',
                 title: BB.getDate() + KL_CONFIG.filenameBase + '.png',
-                callback: callback ? callback : () => {},
+                callback: callback ? callback : () => { },
             });
         };
 
@@ -1827,44 +1868,44 @@ export class KlApp {
         const fileUi = this.embed
             ? null
             : new KL.FileUi({
-                  klRootEl: this.rootEl,
-                  projectStore: projectStore,
-                  getProject: () => this.klCanvas.getProject(),
-                  exportType: exportType,
-                  onExportTypeChange: (type) => {
-                      exportType = type;
-                  },
-                  onFileSelect: (files, optionsStr) =>
-                      importHandler.handleFileSelect(files, optionsStr),
-                  onSaveImageToComputer: () => {
-                      applyUncommitted();
-                      this.saveToComputer.save();
-                  },
-                  onNewImage: showNewImageDialog,
-                  onShareImage: (callback) => {
-                      applyUncommitted();
-                      shareImage(callback);
-                  },
-                  onUpload: () => {
-                      // on upload
-                      applyUncommitted();
-                      KL.imgurUpload(
-                          this.klCanvas,
-                          this.rootEl,
-                          p.app && p.app.imgurKey ? p.app.imgurKey : '',
-                          () => this.updateLastSaved(),
-                      );
-                  },
-                  applyUncommitted: () => applyUncommitted(),
-                  onChangeShowSaveDialog: (b) => {
-                      this.saveToComputer.setShowSaveDialog(b);
-                  },
-                  klRecoveryManager,
-                  onOpenBrowserStorage,
-                  onStoredToBrowserStorage: () => {
-                      this.updateLastSaved();
-                  },
-              });
+                klRootEl: this.rootEl,
+                projectStore: projectStore,
+                getProject: () => this.klCanvas.getProject(),
+                exportType: exportType,
+                onExportTypeChange: (type) => {
+                    exportType = type;
+                },
+                onFileSelect: (files, optionsStr) =>
+                    importHandler.handleFileSelect(files, optionsStr),
+                onSaveImageToComputer: () => {
+                    applyUncommitted();
+                    this.saveToComputer.save();
+                },
+                onNewImage: showNewImageDialog,
+                onShareImage: (callback) => {
+                    applyUncommitted();
+                    shareImage(callback);
+                },
+                onUpload: () => {
+                    // on upload
+                    applyUncommitted();
+                    KL.imgurUpload(
+                        this.klCanvas,
+                        this.rootEl,
+                        p.app && p.app.imgurKey ? p.app.imgurKey : '',
+                        () => this.updateLastSaved(),
+                    );
+                },
+                applyUncommitted: () => applyUncommitted(),
+                onChangeShowSaveDialog: (b) => {
+                    this.saveToComputer.setShowSaveDialog(b);
+                },
+                klRecoveryManager,
+                onOpenBrowserStorage,
+                onStoredToBrowserStorage: () => {
+                    this.updateLastSaved();
+                },
+            });
 
         if (!this.embed && projectStore) {
             this.saveReminder = new SaveReminder({

@@ -19,6 +19,9 @@ const ALPHA_SQUARE = 3;
 
 const TWO_PI = 2 * Math.PI;
 
+// 笔刷实际渲染到画布的作用函数。
+// 类结构体被绑定在 BRUSHES
+// 通过 Object.entries(KL.BRUSHES_UI).forEach 内部遍历new构造实例之后内部的.Ui方法
 export class PenBrush {
     private context: CanvasRenderingContext2D = {} as CanvasRenderingContext2D;
     private klHistory: KlHistory = {} as KlHistory;
@@ -222,7 +225,7 @@ export class PenBrush {
     private continueLine(x: number | null, y: number | null, size: number, pressure: number): void {
         if (this.bezierLine === null) {
             this.bezierLine = new BB.BezierLine();
-            this.bezierLine.add(this.lastInput.x, this.lastInput.y, 0, () => {});
+            this.bezierLine.add(this.lastInput.x, this.lastInput.y, 0, () => { });
         }
 
         const drawArr: [number, number, number, number, number, number | undefined][] = []; //draw instructions. will be all drawn at once
@@ -263,7 +266,7 @@ export class PenBrush {
     }
 
     // ----------------------------------- public -----------------------------------
-    constructor() {}
+    constructor() { }
 
     // ---- interface ----
 
