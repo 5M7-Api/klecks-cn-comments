@@ -169,6 +169,7 @@ export class EaselBrush implements TEaselTool {
     }
   }
 
+  // 用户每次把鼠标移回画板时，都能立刻、稳定地看到笔刷的光标轮廓
   private _onPointerEnter(): void {
     clearTimeout(this.hideCursorTimeout);
     this.svgEl.setAttribute("opacity", "1");
@@ -236,6 +237,8 @@ export class EaselBrush implements TEaselTool {
   setBrush(p: { radius?: number; type?: "round" | "pixel-square" }): void {
     if (p.radius !== undefined) {
       this.radius = p.radius;
+      // 【高光细节】：当鼠标不在画布上时的预览机制
+      // 即使不在画布范围内，也可以让用户在画布中心预览画笔笔刷轮廓大小
       if (!this.isOver) {
         this.svgEl.setAttribute("opacity", "1");
         clearTimeout(this.hideCursorTimeout);
@@ -246,10 +249,11 @@ export class EaselBrush implements TEaselTool {
       const { width, height } = this.easel.getSize();
       this.currentCursor.update(
         this.easel.getTransform(),
-        this.isOver ? this.lastPos : { x: width / 2, y: height / 2 },
+        this.isOver ? this.lastPos : { x: width / 2, y: height / 2 }, // 画布中心
         this.radius,
       );
     }
+    // 判断是否是新的形状，并进行节点替换
     if (p.type !== undefined) {
       const newBrushCursor =
         p.type === "round"
@@ -268,9 +272,12 @@ export class EaselBrush implements TEaselTool {
   }
 
   activate(cursorPos?: TVector2D): void {
+    // 防御机制，万一SVG渲染不出来则有个保底的十字准星
     this.easel.setCursor("crosshair");
-    this.isDragging = false;
+    // 状态清零，防止乱飞一条线出来
+    this.isDragging = false; 
     if (cursorPos) {
+      // 场景 A：使用快捷键切换工具时，鼠标光标会自动定位到画布中心
       this.lastPos.x = cursorPos.x;
       this.lastPos.y = cursorPos.y;
       this.currentCursor.update(
@@ -279,6 +286,7 @@ export class EaselBrush implements TEaselTool {
         this.radius,
       );
     } else {
+      // 场景 B：点击工具栏切换工具，鼠标必然不在画布内，则衔接移出事件隐藏幽灵光标
       this.onPointerLeave();
     }
   }
