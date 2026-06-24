@@ -606,6 +606,7 @@ export class Easel<GToolId extends string> {
         // 特殊触发键（比如 Space）：按下时 pushTempTool 切到临时工具（如手型），松开时 popTempTool 还原。这就是"按住空格变成手型工具，松开回到画笔"的实现
         this.keyListener = new KeyListener({
             onDown: (keyStr, e, comboStr, isRepeat) => {
+                // console.debug('[easel] key down', keyStr, comboStr, event);
                 if (this.isFrozen) {
                     return;
                 }

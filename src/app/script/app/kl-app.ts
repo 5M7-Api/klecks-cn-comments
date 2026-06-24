@@ -869,9 +869,10 @@ export class KlApp {
             }
         };
 
-        // 键盘事件监听器
+        // 整个APP的键盘事件监听器
         const keyListener = new BB.KeyListener({
             onDown: (keyStr, event, comboStr) => {
+                // console.debug('[kl-app] key down', keyStr, comboStr, event);
                 if (KL.DIALOG_COUNTER.get() > 0 || BB.isInputFocused(true)) {
                     return;
                 }
