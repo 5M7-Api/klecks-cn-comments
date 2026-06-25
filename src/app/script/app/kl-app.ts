@@ -873,25 +873,39 @@ export class KlApp {
         const keyListener = new BB.KeyListener({
             onDown: (keyStr, event, comboStr) => {
                 // console.debug('[kl-app] key down', keyStr, comboStr, event);
+                // ==========================================
+                // 1. 全局安全守卫 (Guard Clauses)
+                // ==========================================
+                // 守卫 A：如果当前屏幕上有弹窗（如设置面板、提示框），或者用户正在输入框里打字
+                // 则立刻拦截快捷键，防止用户在输入 "brush" 时意外触发 "b" 键切换了画笔。
                 if (KL.DIALOG_COUNTER.get() > 0 || BB.isInputFocused(true)) {
                     return;
                 }
 
+                // 守卫 B：如果当前正在画线（鼠标左键按下未松开），或者画板处于锁定状态
+                // 绝对禁止触发快捷键！防止在画到一半时突然切工具导致状态机崩溃。
                 const isDrawing = this.lineSanitizer.getIsDrawing() || this.easel.getIsLocked();
                 if (isDrawing) {
                     return;
                 }
 
+                // ==========================================
+                // 2. 视图与历史记录控制
+                // ==========================================
+                // Home键：画面自适应屏幕大小 (Fit View)
                 if (comboStr === 'home') {
                     this.easel.fitTransform();
                 }
+                // End键：画面恢复 100% 原始比例 (Reset View)
                 if (comboStr === 'end') {
                     this.easel.resetTransform();
                 }
+                // 撤销 (Undo)：兼容 Windows(Ctrl) 和 Mac(Cmd)
                 if (['ctrl+z', 'cmd+z'].includes(comboStr)) {
                     event.preventDefault();
                     undo();
                 }
+                // 重做 (Redo)：支持 Ctrl+Y 或者 Ctrl+Shift+Z
                 if (
                     ['ctrl+y', 'cmd+y'].includes(comboStr) ||
                     ((BB.sameKeys('ctrl+shift+z', comboStr) ||
@@ -901,12 +915,19 @@ export class KlApp {
                     event.preventDefault();
                     redo();
                 }
+                // ==========================================
+                // 3. 文件系统与数据持久化 (仅限独立运行模式)
+                // ==========================================
+                // 如果当前不是作为嵌入式组件 (Embed) 运行，才启用保存快捷键
                 if (!this.embed) {
+                    // Ctrl + S：普通保存（通常是下载图片到本地）
                     if (['ctrl+s', 'cmd+s'].includes(comboStr)) {
                         event.preventDefault();
+                        // 提交尚未确认的操作（如正在编辑的文字）
                         applyUncommitted();
                         this.saveToComputer.save();
                     }
+                    // Ctrl + Shift + S：保存工程文件到浏览器的本地存储 (IndexedDB)
                     if (['ctrl+shift+s', 'cmd+shift+s'].includes(comboStr)) {
                         event.preventDefault();
                         applyUncommitted();
@@ -917,7 +938,9 @@ export class KlApp {
                                 const meta = projectStore!.getCurrentMeta();
                                 const project = this.getProject();
 
+                                // 如果当前存储库里的项目ID和正在画的项目ID不一致，说明可能会覆盖别人的画
                                 if (meta && meta.projectId !== project.projectId) {
+                                    // 弹窗警告用户是否覆盖
                                     const doOverwrite = await new Promise<boolean>(
                                         (resolve, reject) => {
                                             showModal({
@@ -939,6 +962,7 @@ export class KlApp {
                                     }
                                 }
 
+                                // 执行真实的存储逻辑，并配有成功/失败的 UI 提示 (statusOverlay)
                                 let success = true;
                                 try {
                                     await projectStore!.store(this.klCanvas.getProject());
@@ -964,27 +988,39 @@ export class KlApp {
                             this.statusOverlay.out('❌ ' + LANG('file-storage-failed'), true);
                         }
                     }
+                    // Ctrl + C：复制当前图层或选区到剪贴板
                     if (['ctrl+c', 'cmd+c'].includes(comboStr)) {
                         event.preventDefault();
                         applyUncommitted();
                         copyToClipboard(true);
                     }
                 }
+                // Ctrl + A：全选（通常拦截浏览器默认的全选网页文本行为）
                 if (['ctrl+a', 'cmd+a'].includes(comboStr)) {
                     event.preventDefault();
                 }
 
+                // ==========================================
+                // 4. 工具属性快速调整
+                // ==========================================
+                // 左方括号 `[`：缩小笔刷
                 if (comboStr === 'sqbr_open') {
+                    // 这里的增量计算很巧妙：根据当前画板的缩放比例 (scale) 动态计算调整步长。
+                    // 画板放得越大，按一下调整的物理像素越精确（越小）。
+                    // todo：sai没有此机制。sai的放大倍率取决于笔刷目前的大小，越小精度越小。
                     currentBrushUi.decreaseSize(
                         Math.max(0.005, 0.03 / this.easel.getTransform().scale),
                     );
                 }
+                // 右方括号 `]`：放大笔刷
                 if (comboStr === 'sqbr_close') {
                     currentBrushUi.increaseSize(
                         Math.max(0.005, 0.03 / this.easel.getTransform().scale),
                     );
                 }
+                // 回车键 Enter：快速填充颜色
                 if (comboStr === 'enter') {
+                    // 如果没有正在处理的未提交变换，则执行油漆桶填充逻辑
                     if (!applyUncommitted()) {
                         this.klCanvas.layerFill(
                             currentLayer.index,
@@ -992,6 +1028,7 @@ export class KlApp {
                             undefined,
                             true,
                         );
+                        // 提示用户是“填充了选区”还是“填充了全图”
                         this.statusOverlay.out(
                             this.klCanvas.getSelection()
                                 ? LANG('filled-selected-area')
@@ -1000,22 +1037,29 @@ export class KlApp {
                         );
                     }
                 }
+                // Esc键：取消/丢弃当前未完成的操作（例如取消选区、取消文字输入）
                 if (comboStr === 'esc') {
                     if (discardUncommitted()) {
                         event.preventDefault();
                     }
                 }
+                // Delete / Backspace：清空当前图层
                 if (['delete', 'backspace'].includes(comboStr)) {
                     clearLayer(true);
                 }
+                // Ctrl + Shift + E：向下合并图层对话框
                 if (comboStr === 'ctrl+shift+e' || comboStr === 'shift+ctrl+e') {
                     event.preventDefault();
                     this.layersUi.advancedMergeDialog();
                 }
+                // E键 (Eraser)：橡皮擦
                 if (comboStr === 'shift+e') {
+                    // Shift+E 仅切换当前笔刷的橡皮擦模式
+                    // todo：按了没反应？
                     event.preventDefault();
                     currentBrushUi.toggleEraser?.();
                 } else if (comboStr === 'e') {
+                    // 按 E 键直接激活橡皮擦工具，并同步更新左侧/顶部的 UI 选项卡
                     event.preventDefault();
                     applyUncommitted();
                     this.easel.setTool('brush');
@@ -1024,6 +1068,7 @@ export class KlApp {
                     updateMainTabVisibility();
                     brushTabRow.open('eraserBrush');
                 }
+                // B键 (Brush)：画笔
                 if (comboStr === 'b') {
                     event.preventDefault();
                     const prevMode = this.easel.getTool();
@@ -1033,15 +1078,19 @@ export class KlApp {
                     this.toolspaceToolRow.setActive('brush');
                     mainTabRow?.open('brush');
                     updateMainTabVisibility();
+                    // 【交互细节】：如果你已经在画笔工具下了，再按一次 B 键，
+                    // 它会在几种不同的画笔预设（如铅笔、水彩、马克笔）之间循环切换。
                     brushTabRow.open(
                         prevMode === 'brush' && prevMainTabId === 'brush'
                             ? getNextBrushId()
                             : currentBrushId,
                     );
                 }
+                // G键 (Gradient/Bucket)：渐变与油漆桶
                 if (comboStr === 'g') {
                     event.preventDefault();
                     applyUncommitted();
+                    // 经典的切换逻辑：按 G 在“油漆桶”和“渐变拉线”之间来回切换
                     const newMode =
                         this.easel.getTool() === 'paintBucket' ? 'gradient' : 'paintBucket';
                     this.easel.setTool(newMode);
@@ -1049,6 +1098,7 @@ export class KlApp {
                     mainTabRow?.open(newMode);
                     updateMainTabVisibility();
                 }
+                // T键 (Text)：文本工具
                 if (comboStr === 't') {
                     event.preventDefault();
                     applyUncommitted();
@@ -1057,6 +1107,7 @@ export class KlApp {
                     mainTabRow?.open('text');
                     updateMainTabVisibility();
                 }
+                // U键 (shape)：几何形状工具
                 if (comboStr === 'u') {
                     event.preventDefault();
                     applyUncommitted();
@@ -1065,6 +1116,7 @@ export class KlApp {
                     mainTabRow?.open('shape');
                     updateMainTabVisibility();
                 }
+                // L键 (Lasso/Select)：选区套索工具
                 if (comboStr === 'l') {
                     event.preventDefault();
                     const prevTool = this.easel.getTool();
@@ -1075,6 +1127,8 @@ export class KlApp {
                     this.toolspaceToolRow.setActive('select');
                     mainTabRow?.open('select');
                     updateMainTabVisibility();
+                    // 【交互细节】：如果已经在选区工具了，再按 L，会将模式切为“变形 (transform)”
+                    // 这允许用户快速画一个圈，按L，然后立刻拖动变形。
                     if (
                         prevTool === 'select' &&
                         prevSelectMode === 'select' &&
@@ -1083,6 +1137,7 @@ export class KlApp {
                         klAppSelect.getSelectUi().setMode('transform');
                     }
                 }
+                // X键：交换前景色与背景色
                 if (comboStr === 'x') {
                     event.preventDefault();
                     this.klColorSlider.swapColors();
@@ -1091,21 +1146,40 @@ export class KlApp {
             onUp: (keyStr, event) => { },
         });
 
+        // 创建一个字典（Map），用来集中存放实例化之后的各个画笔 UI 组件
+        // 比如 { 'pen': PenUiInstance, 'eraser': EraserUiInstance }
         const brushUiMap: {
             [key: string]: any;
         } = {};
+        // 遍历全局配置 KL.BRUSHES_UI 中注册的所有画笔
+        // Object.entries 会把对象变成数组：[['pen', penConfig], ['watercolor', waterConfig]]
         // create brush UIs
+        // console.debug('kl-app: create brush UIs'); // debug
+        // console.dir(KL.BRUSHES_UI); // debug
         Object.entries(KL.BRUSHES_UI).forEach(([b, brushUi]) => {
+            // 【核心模式：动态实例化】
+            // 这里并没有写死 new PenUi()，而是根据字典里的类 (brushUi.Ui) 动态 new 出来。
+            // 传入的参数是一组回调函数，这构成了 UI 与底层逻辑的通讯桥梁。
             const ui = new (brushUi.Ui as any)({
+                // 传入历史记录对象（某些画笔 UI 可能需要知道当前是否可以撤销，或者绑定特定状态）
                 klHistory: this.klHistory,
+                // 当 UI 面板上的“尺寸”滑块被拖动时触发
                 onSizeChange: sizeWatcher,
+                // 当 UI 面板上的“散布/飞溅”滑块被拖动时触发
                 onScatterChange: (scatter: number) => {
+                    // UI 组件自己不去修改底层画笔，而是向“画笔设置服务”发射（emit）一个广播。
+                    // 谁在监听这个广播？底层真正的画笔引擎！
                     brushSettingService.emitScatter(scatter);
                 },
+                // 当 UI 面板上的“不透明度”滑块被拖动时触发
                 onOpacityChange: (opacity: number) => {
                     brushSettingService.emitOpacity(opacity);
                 },
+                // 当画笔自身的特殊配置（比如笔尖形状、混合模式）发生改变时触发
                 onConfigChange: () => {
+                    // 通知全局服务：当前画笔的配置变了！
+                    // 注意这里不仅同步了状态，还同步了“滑块的配置（Config）”
+                    // 因为不同的画笔，滑块的范围是不同的（比如铅笔最大20px，水彩最大100px）
                     brushSettingService.emitSliderConfig({
                         sizeSlider: KL.BRUSHES_UI[currentBrushId].sizeSlider,
                         opacitySlider: KL.BRUSHES_UI[currentBrushId].opacitySlider,
@@ -1113,7 +1187,9 @@ export class KlApp {
                     });
                 },
             });
+            // 将实例化好的 UI 组件存入大字典中，方便后续通过按键或点击切换画笔时，直接调出对应的 UI
             brushUiMap[b] = ui;
+            // 获取该 UI 组件真实的 DOM 节点，并统一加上 10px 的内边距样式
             ui.getElement().style.padding = 10 + 'px';
         });
 
