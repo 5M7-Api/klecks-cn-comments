@@ -182,8 +182,8 @@ export class SelectionRenderer {
      */
     setSelection(selection?: MultiPolygon): void {
         // debug
-        console.log('SelectionRenderer 真实选区更新: ' );
-        console.dir(selection);
+        // console.log('SelectionRenderer 真实选区更新: ' );
+        // console.dir(selection);
 
         if (this.selection === selection) {
             // 引用相同，数据没变，跳过
