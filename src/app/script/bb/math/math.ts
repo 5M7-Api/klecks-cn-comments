@@ -194,27 +194,53 @@ export function updateBounds<GBoundsType extends TCoordinateBounds | TIndexBound
     return target;
 }
 
+/**
+ * 核心算法：计算两个包围盒的“交集（重叠部分）”
+ * @param bounds 第一个包围盒（比如：用户这一笔影响的脏矩形范围）
+ * @param limit 第二个包围盒（限制范围，比如：物理画布的总大小，或选区的大小）
+ */
 export function intersectBounds<GBoundsType extends TCoordinateBounds | TIndexBounds>(
     bounds: GBoundsType | undefined,
     limit: GBoundsType | undefined,
 ): GBoundsType | undefined {
+    // 【边界防御】：如果连画笔范围都没有，那交集自然是空
     if (!bounds) {
         return undefined;
     }
+    // 【短路优化】：如果没有限制范围，那用户画在哪，交集就是哪
     if (!limit) {
         return bounds;
     }
+    // =========================================================
+    // 【神级数学公式】：利用 Max 和 Min 瞬间算出交集矩形
+    // =========================================================
+    // 交集矩形的左边缘 (x1)：取两者左边缘中“更靠右（更大）”的那个
     const x1 = Math.max(limit.x1, bounds.x1);
+    // 交集矩形的上边缘 (y1)：取两者上边缘中“更靠下（更大）”的那个
     const y1 = Math.max(limit.y1, bounds.y1);
+
+    // 交集矩形的右边缘 (x2)：取两者右边缘中“更靠左（更小）”的那个
     const x2 = Math.min(limit.x2, bounds.x2);
+    // 交集矩形的下边缘 (y2)：取两者下边缘中“更靠上（更小）”的那个
     const y2 = Math.min(limit.y2, bounds.y2);
 
+    // 【相交判定】：
+    // 正常情况下，一个合法的矩形必须是 左边缘 <= 右边缘 (x1 <= x2)
+    // 如果算出来左边缘跑到了右边缘的右边，说明这两个矩形【完美错开，根本没有交集】！
     if (x1 > x2 || y1 > y2) {
         return undefined;
     }
+
+    // 拼装出重叠部分的全新矩形并返回
     return { type: bounds?.type ?? limit?.type, x1, y1, x2, y2 } as GBoundsType;
 }
 
+/**
+ * 业务封装：将一个包围盒限制在“画布物理尺寸”之内
+ * @param bounds 输入的包围盒
+ * @param width 画布宽度
+ * @param height 画布高度
+ */
 /**
  * determine overlap of bounds with width&height
  */
@@ -226,10 +252,14 @@ export function indexBoundsInArea(
     if (!bounds) {
         return undefined;
     }
+    // 构造一个代表“整个画布”的极限包围盒，扔给上面的核心算法去求交集
     return intersectBounds(bounds, {
         type: 'index',
         x1: 0,
         y1: 0,
+        // 【首尾呼应的细节】：注意这里的 -1 ！！！
+        // 因为这是 IndexBounds（包含边界），索引从 0 开始。
+        // 如果画布宽 1000，那么合法的最后那一列像素的索引就是 999。
         x2: width - 1,
         y2: height - 1,
     });

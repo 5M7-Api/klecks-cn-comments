@@ -557,8 +557,6 @@ export class KlApp {
                 discardUncommitted();
             }
             const composedBefore = this.klHistory.getComposed();
-            console.debug("undo data")
-            console.dir(composedBefore)
             const result = klHistoryExecutor.undo();
             if (!result) {
                 // didn't do anything

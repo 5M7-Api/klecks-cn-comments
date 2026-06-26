@@ -394,7 +394,7 @@ export class PenBrush {
      */
     startLine(x: number, y: number, p: number): void {
         // --- 1. 选区(蚂蚁线)处理 ---
-        // 从历史记录或图层管理器中获取当前是否存在选区
+        // 从历史记录获得当前画面的最终状态
         this.selection = this.klHistory.getComposed().selection.value;
         // 如果有选区，将其转换为 Canvas 的 Path2D 路径对象
         this.selectionPath = this.selection ? getSelectionPath2d(this.selection) : undefined;

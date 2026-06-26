@@ -218,7 +218,9 @@ export class KlHistory {
         return this.entries.slice(0, this.index + 1);
     }
 
+    // 获取当前画面的最终状态
     getComposed(): THistoryEntryDataComposed {
+        // console.log('getComposed', this.composed); // debug
         return this.composed;
     }
 

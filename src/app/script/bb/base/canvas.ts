@@ -486,6 +486,7 @@ export function getCanvasBounds(
     };
 }
 
+// 外部引入提示：在浏览器的 Canvas API 中，ImageData 代表底层真实的像素数组
 export function getImageDataSafely(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -494,8 +495,12 @@ export function getImageDataSafely(
     height: number,
 ): ImageData {
     try {
+        // 尝试向浏览器索要这块区域的真实物理像素数据
         return ctx.getImageData(x, y, width, height);
     } catch (e) {
+        // 【核心防御】：如果浏览器因为安全或状态原因拒绝提供数据，抛出异常
+        // 我们不让整个网页白屏崩溃，而是默默吞下这个错误，
+        // 并“伪造”一张和要求尺寸一模一样的、全透明的空白图像交还给调用者。
         return new ImageData(width, height);
     }
 }
