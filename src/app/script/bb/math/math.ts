@@ -265,9 +265,21 @@ export function indexBoundsInArea(
     });
 }
 
+/**
+ * 将浮点数坐标包围盒，转换为整数像素索引包围盒
+ * 它的作用是把一个可能带小数的框，向外扩张到恰好包裹住它的完整像素网格上。
+ * * @param bounds 带有小数的物理坐标边界 (例如: x1: 1.2, x2: 10.0)
+ * @returns 整数像素索引边界 (例如: x1: 1, x2: 9)
+ */
 export function coordinateBoundsToIndexBounds(bounds: TCoordinateBounds): TIndexBounds {
+    // 处理左上角 (起点)：向下取整
+    // 如果坐标是 1.8，说明它落在第 1 个像素内，所以索引从 1 开始
     const x1 = Math.floor(bounds.x1);
     const y1 = Math.floor(bounds.y1);
+    // 处理右下角 (终点)：减 1 后向上取整
+    // 减 1 的原因是抵消像素本身的 1 单位宽度。
+    // 如果 x2 是 10.0 (刚好在边界)，计算结果是 9，不会误伤第 10 个像素。
+    // 如果 x2 是 10.1 (越界了一点点)，计算结果是 10，成功把第 10 个像素囊括进来。
     const x2 = Math.ceil(bounds.x2 - 1);
     const y2 = Math.ceil(bounds.y2 - 1);
     return { type: 'index', x1, y1, x2, y2 };

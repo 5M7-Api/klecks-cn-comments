@@ -380,6 +380,7 @@ export class BezierLine {
 
 export type TSplineInputPoints = [number, number][]; // [x, y]
 
+// ! 生成一个二维坐标系函数，穿过初始化所有坐标点的曲线
 /**
  * from SplineInterpolator.cs in the Paint.NET source code
  */
@@ -448,6 +449,9 @@ export class SplineInterpolator {
         return this.last;
     }
 
+    /**
+     * 给定任意 X，通过三次样条公式求出平滑映射的 Y 值
+     */
     interpolate(x: number): number {
         const n = this.ya.length;
         let klo = 0;

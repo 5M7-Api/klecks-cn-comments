@@ -40,7 +40,7 @@ export class PenBrush {
     private settingHasSizePressure: boolean = true;
     // 笔刷大小
     private settingSize: number = 2;
-    // 笔刷印章的间距
+    // ! 笔刷印章的间距，应注意修改笔刷大小时会同步修改此值来适配线条
     private settingSpacing: number = 0.8489;
     // 基础透明度
     private settingOpacity: number = 1;
@@ -80,7 +80,7 @@ export class PenBrush {
     private readonly alphaCanvas32: HTMLCanvasElement = BB.canvas(32, 32);
     // 针对不同笔刷微调的基础透明度修正
     private readonly alphaOpacityArr: number[] = [1, 0.9, 1, 1];
-
+    
     // ------------------------------------------------------------------------
     // 3. 内存优化：脏矩形/脏瓦片 (Dirty Tiles)
     // ------------------------------------------------------------------------

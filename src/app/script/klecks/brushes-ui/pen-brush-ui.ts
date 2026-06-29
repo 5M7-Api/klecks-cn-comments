@@ -117,7 +117,7 @@ export const penBrushUi = (function () {
             }),
             initId: 0,
             onChange: (id) => {
-                // ! 当用户点击图标时，修改底层画笔的笔尖类型
+                // 当用户点击图标时，修改底层画笔的笔尖类型
                 brush.setAlpha(id);
             },
         });
@@ -149,13 +149,12 @@ export const penBrushUi = (function () {
             [30, 3],
             [50, 2.7],
             [100, 2],
-            // 稍等，这里作者定义的曲线好像是倒过来的：笔越大点距越密集？
-            // 我们看下面的 Math.max(2, spacingSpline.interpolate(size)) / 15，这其实是在算一个百分比参数。
         ]);
 
         function setSize(size: number) {
             brush.setSize(size);
-            // ! 每次改大小，都会联动修改点距，兼顾丝滑与性能。
+            // ! 每次改大小，都会联动修改点距权重，兼顾丝滑与性能。
+            // ! 对于小笔刷（比如 X = 8px） 查表得出 Y = 7 比例系数 = 7 / 15 ≈ 46.6% 实际盖章距离 = 8px × 46.6% = 3.7 像素
             brush.setSpacing(Math.max(2, spacingSpline.interpolate(size)) / 15);
         }
 
