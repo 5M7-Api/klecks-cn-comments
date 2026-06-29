@@ -2,6 +2,9 @@ import { BB } from '../../../bb/bb';
 import { noise } from '../../../bb/math/perlin';
 import { TVector2D } from '../../../bb/bb-types';
 
+// ==========================================
+// 1. 生成粉笔/炭笔质感笔尖 (Chalk)
+// ==========================================
 // chalk
 export function genBrushAlpha01(w: number): HTMLCanvasElement {
     const scaleFac = w / 500;
@@ -45,6 +48,10 @@ export function genBrushAlpha01(w: number): HTMLCanvasElement {
     return canvas;
 }
 
+// ==========================================
+// 2. 数学工具：计算二维平面上一点到线段的最短距离
+// 来源于 ShaderToy SDF (Signed Distance Field) 算法
+// ==========================================
 // https://www.shadertoy.com/view/3tdSDj
 function udSegment(p: TVector2D, a: TVector2D, b: TVector2D): number {
     const ba = BB.Vec2.sub(b, a);
@@ -53,6 +60,9 @@ function udSegment(p: TVector2D, a: TVector2D, b: TVector2D): number {
     return BB.Vec2.len(BB.Vec2.sub(pa, BB.Vec2.mul(ba, h)));
 }
 
+// ==========================================
+// 3. 生成书法/扁平质感笔尖 (Calligraphy)
+// ==========================================
 // calligraphy
 export function genBrushAlpha02(w: number): HTMLCanvasElement {
     const pDist = 1 / 4;

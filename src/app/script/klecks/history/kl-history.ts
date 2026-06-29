@@ -220,7 +220,7 @@ export class KlHistory {
 
     // 获取当前画面的最终状态
     getComposed(): THistoryEntryDataComposed {
-        // console.log('getComposed', this.composed); // debug
+        console.log('getComposed', this.composed); // debug
         return this.composed;
     }
 

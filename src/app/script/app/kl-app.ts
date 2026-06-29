@@ -276,19 +276,35 @@ export class KlApp {
             },
         });
 
+        // 1. 获取当前浏览器窗口的真实物理宽高
+        // Math.max(0, ...) 是一个防御性编程：防止在某些极端边缘场景（如浏览器最小化或 iframe 异常时）
+        // 拿到负数导致后续画布崩溃。
         this.uiWidth = Math.max(0, window.innerWidth);
         this.uiHeight = Math.max(0, window.innerHeight);
+
+        // 设置默认的导出格式
         let exportType: TExportType = 'png';
 
+        // 2. 计算初始化画布的宽度 (initialWidth)
+        // 这里使用了一个非常经典的“钳制公式 (Clamping)”：Math.max(min, Math.min(max, value))
         const initialWidth = Math.max(
             10,
             Math.min(
+                // 【上限】：画布宽度绝对不能超过引擎/浏览器的极限 (maxCanvasSize)
                 maxCanvasSize,
+                // 【核心计算逻辑】：自适应宽度分配
                 window.innerWidth < this.collapseThreshold
+                    // 分支 A（移动端/小屏幕）：如果屏幕宽度小于折叠阈值，
+                    // 此时工具栏通常是悬浮或隐藏的，所以画布宽度直接占满全屏 (uiWidth)
                     ? this.uiWidth
+                    // 分支 B（桌面端/大屏幕）：屏幕足够宽，左侧或右侧的工具栏会固定显示，
+                    // 此时画布宽度必须扣除工具栏的宽度 (toolWidth)，以完美嵌入剩余空间
                     : this.uiWidth - this.toolWidth,
             ),
         );
+        // 3. 计算初始化画布的高度 (initialHeight)
+        // 同样使用钳制公式，限制在 10 到 maxCanvasSize 之间。
+        // 高度计算比较简单，默认直接占满屏幕的可视高度。
         const initialHeight = Math.max(10, Math.min(maxCanvasSize, this.uiHeight));
 
         // 历史记录初始化
