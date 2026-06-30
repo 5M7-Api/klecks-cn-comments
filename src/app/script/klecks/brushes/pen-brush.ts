@@ -135,7 +135,8 @@ export class PenBrush {
 
             ctx.save();
             ctx.clearRect(0, 0, instructionArr[i][1], instructionArr[i][1]);
-
+            
+            // ! 此处为渲染自定义笔刷图案的代码
             // 1. 先用用户选择的颜色（比如红色），涂满整个备用画布
             ctx.fillStyle =
                 'rgba(' +
@@ -147,6 +148,7 @@ export class PenBrush {
                 ', ' +
                 this.alphaOpacityArr[this.settingAlphaId] +
                 ')';
+            // todo: 使用方形笔刷头是否必要？
             ctx.fillRect(0, 0, instructionArr[i][1], instructionArr[i][1]);
 
             // 2. 图像混合魔法：'destination-in'
