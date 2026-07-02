@@ -7,6 +7,10 @@ import { matrixToTuple } from '../../bb/math/matrix-to-tuple';
 import { coordinateBoundsToIndexBounds } from '../../bb/math/math';
 
 /**
+ * 形状工具的输入处理器 (状态机)
+ * 作用：记录用户鼠标按下的起点(downX, downY)，并在拖拽和松开时，将起点和终点一并传给外部的回调函数。
+ */
+/**
  * Input processor for shape tool.
  * Coordinates are in canvas space.
  * angleRad is the angle of the canvas.
@@ -22,7 +26,7 @@ export class ShapeTool {
     ) => void;
     private downX: number = 0;
     private downY: number = 0;
-    private downAngleRad: number = 0;
+    private downAngleRad: number = 0; // 记录按下时画布的全局旋转角度
 
     // ----------------------------------- public -----------------------------------
     constructor(p: {
@@ -45,14 +49,20 @@ export class ShapeTool {
     }
 
     onMove(x: number, y: number): void {
+        // 拖拽中，isDone = false，通常用于在临时图层上渲染预览
         this.onShape(false, this.downX, this.downY, x, y, this.downAngleRad);
     }
 
     onUp(x: number, y: number): void {
+        // 绘制完成，isDone = true，将形状固化到真实图层并生成历史记录
         this.onShape(true, this.downX, this.downY, x, y, this.downAngleRad);
     }
 }
 
+/**
+ * 【核心渲染函数】：在 Canvas 上绘制几何形状
+ * 它不仅要画出图形，还要精确计算出该图形影响的包围盒(Bounds)返回给历史记录系统。
+ */
 /**
  * Draw a shape (rectangle, ellipse, line)
  */
@@ -61,6 +71,7 @@ export function drawShape(
     shapeObj: TShapeToolObject,
     selectionPath?: Path2D,
 ): TIndexBounds {
+    // 1. 补全默认属性
     shapeObj = {
         // defaults
         angleRad: 0,
@@ -89,14 +100,17 @@ export function drawShape(
         ) {
             throw new Error('fillRgb and strokeRgb undefined');
         }
+        // 2. 颜色预处理 (如果是橡皮擦模式，强行设为白色，因为实际生效的是混合模式 destination-out)
         const colorRgb: TRgb = shapeObj.isEraser
             ? { r: 255, g: 255, b: 255 }
             : shapeObj.fillRgb
               ? shapeObj.fillRgb
               : shapeObj.strokeRgb!;
 
+        // 3. Canvas 渲染环境准备
         // --- prep canvas ---
         ctx.save();
+        // 选区蒙版
         selectionPath && ctx.clip(selectionPath);
         if (shapeObj.opacity) {
             ctx.globalAlpha = shapeObj.opacity;
@@ -107,8 +121,11 @@ export function drawShape(
         if (shapeObj.doLockAlpha) {
             ctx.globalCompositeOperation = 'source-atop';
         }
+
+        // 抵消整个画板的全局旋转，确保用户在旋转画板后，画出的水平线依然是“视觉水平”的
         const transformation = compose(rotate(-shapeObj.angleRad));
         ctx.setTransform(...matrixToTuple(transformation));
+
         if (shapeObj.fillRgb) {
             ctx.fillStyle = BB.ColorConverter.toRgbStr(colorRgb);
         } else if (shapeObj.strokeRgb) {
@@ -121,6 +138,10 @@ export function drawShape(
         let x2 = shapeObj.x2;
         let y2 = shapeObj.y2;
 
+        // ==========================================
+        // 修饰符 1：角度吸附 (按住 Shift 画直线)
+        // 将自由角度强行吸附到 45度、90度 等整数倍角度上
+        // ==========================================
         // --- angle snapping ---
         if (shapeObj.isAngleSnap) {
             const r1 = BB.rotate(x1, y1, (shapeObj.angleRad / Math.PI) * 180);
@@ -128,6 +149,7 @@ export function drawShape(
 
             const pAngleDeg = BB.pointsToAngleDeg(r1, r2) + 90;
             const pAngleDegSnapped = Math.round(pAngleDeg / 45) * 45;
+            // 绕起点旋转终点坐标
             const rotated = BB.rotateAround(
                 { x: x1, y: y1 },
                 { x: x2, y: y2 },
@@ -136,6 +158,7 @@ export function drawShape(
             x2 = rotated.x;
             y2 = rotated.y;
 
+            // 微调：消除浮点数计算带来的极微小误差，强制正交
             // needs to be perfect if p1->p2 aligns with canvas x- or y-axis
             if ((angleDeg + pAngleDegSnapped) % 90 === 0) {
                 if (Math.round((angleDeg - pAngleDegSnapped) / 90) % 2 === 0) {
@@ -153,6 +176,10 @@ export function drawShape(
         let dX = x2 - x1;
         let dY = y2 - y1;
 
+        // ==========================================
+        // 修饰符 2：等比缩放 (按住 Shift 画正方形/正圆)
+        // 比较宽和高，取绝对值较小的一方，强制作为另一方的长度
+        // ==========================================
         // --- 1:1 ratio ---
         if (shapeObj.type !== 'line' && shapeObj.isFixedRatio) {
             let r1 = BB.rotate(shapeObj.x1, shapeObj.y1, (shapeObj.angleRad / Math.PI) * 180);
@@ -185,6 +212,10 @@ export function drawShape(
             dY = y2 - y1;
         }
 
+        // ==========================================
+        // 修饰符 3：从中心绘制 (按住 Alt)
+        // 起点 x1 不再是左上角，而是中心点。原先的宽高 dX, dY 直接翻倍。
+        // ==========================================
         // outwards modifier
         if (shapeObj.isOutwards) {
             x -= dX;
@@ -201,8 +232,13 @@ export function drawShape(
         let p1;
         let p2;
         if (shapeObj.type === 'line') {
+            // ==========================================
+            // 【黑魔法：0.5像素偏移消除模糊】
+            // 浏览器 Canvas 画线是“居中绘制”的。如果画一根 1px 的线在 x=10。
+            // 它会占据 9.5 到 10.5 的空间。由于屏幕没有半个像素，浏览器会把它模糊成 2 像素宽的灰色线。
+            // 解决方案：如果线宽是奇数，必须强行给坐标加上 0.5 (让线落在 9.5，从而渲染在 9.0~10.0，完美占据 1 个物理像素)。
+            // ==========================================
             // --- line ---
-
             // rounded
             const x1r = Math.round(x1);
             const y1r = Math.round(y1);
@@ -214,7 +250,9 @@ export function drawShape(
             const y1f = Math.floor(y1);
             const x2f = Math.floor(x2);
             const y2f = Math.floor(y2);
-
+            
+            // 线宽是偶数 (如 2px)：直接用整数坐标，(x-1 到 x+1) 刚好完美对齐像素网格
+            // 作者在这里写了极其冗长的 if-else，全是为了判断当前画的是水平线还是垂直线，并给予最严谨的取整补偿。
             if (lineWidth % 2 === 0) {
                 if (y1r === y2r) {
                     p1 = {
@@ -257,6 +295,7 @@ export function drawShape(
                     };
                 }
             } else {
+                // 线宽是奇数 (如 1px, 3px)
                 p1 = {
                     x: x1f,
                     y: y1f,
@@ -266,6 +305,7 @@ export function drawShape(
                     y: y2f,
                 };
                 if (y1f === y2f) {
+                    // Y 坐标强制加上 0.5 解决模糊
                     if (x1f < x2f) {
                         p2.x += 1;
                     } else {
@@ -274,6 +314,7 @@ export function drawShape(
                     p1.y += 0.5;
                     p2.y += 0.5;
                 } else if (x1f === x2f) {
+                    // X 坐标强制加上 0.5 解决模糊
                     if (y1f < y2f) {
                         p2.y += 1;
                     } else {
@@ -289,6 +330,7 @@ export function drawShape(
                 }
             }
 
+            // 计算包围盒 (考虑线宽)
             bounds = {
                 type: 'coordinate',
                 x1: Math.min(p1.x, p2.x) - lineWidth / 2,
@@ -300,11 +342,13 @@ export function drawShape(
             p1 = BB.rotate(p1.x, p1.y, (shapeObj.angleRad / Math.PI) * 180);
             p2 = BB.rotate(p2.x, p2.y, (shapeObj.angleRad / Math.PI) * 180);
 
+            // 执行绘制
             ctx.beginPath();
             ctx.moveTo(p1.x, p1.y);
             ctx.lineTo(p2.x, p2.y);
             ctx.stroke();
         } else if (shapeObj.type === 'rect') {
+            // ... (同理，矩形绘制为了保证边缘锐利，也做了详尽的 0.5 像素和偶数线宽补偿) ...
             // --- rect ---
 
             // floored
@@ -397,6 +441,8 @@ export function drawShape(
                 ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
             }
         } else {
+            // --- 椭圆 (ellipse) ---
+            // 直接通过中心点 (x+dx/2, y+dy/2) 和 半径 rX, rY 绘制
             // --- circle ---
             p1 = BB.rotate(x1, y1, (shapeObj.angleRad / Math.PI) * 180);
             p2 = BB.rotate(x2, y2, (shapeObj.angleRad / Math.PI) * 180);
@@ -418,6 +464,8 @@ export function drawShape(
             } else {
                 ctx.stroke();
             }
+
+            // 椭圆的包围盒计算比较简单，直接用中心点加减半径即可
             const padding = shapeObj.fillRgb ? 0 : lineWidth / 2;
             // bounds are bigger than they need to be when it's rotated and rX ~ rY. should be good enough though.
             bounds = transformCoordinateBounds(
@@ -428,6 +476,7 @@ export function drawShape(
                     x2: center.x + rX + padding,
                     y2: center.y + rY + padding,
                 },
+                // 如果画布旋转了，包围盒也要跟着旋转变形
                 transformation,
             );
         }
@@ -437,5 +486,6 @@ export function drawShape(
         throw new Error('unknown shape');
     }
 
+    // 坐标空间转换：把物理坐标系包围盒转化为索引包围盒，供后续历史记录使用
     return coordinateBoundsToIndexBounds(bounds);
 }

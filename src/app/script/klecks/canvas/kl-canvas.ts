@@ -1004,6 +1004,9 @@ export class KlCanvas {
         });
     }
 
+    /**
+     * 镜像翻转 (支持水平、垂直或同时翻转)
+     */
     flip(isHorizontal: boolean, isVertical: boolean, layerIndex?: number): void {
         if (!isHorizontal && !isVertical) {
             return;
@@ -1014,6 +1017,7 @@ export class KlCanvas {
         temp.height = this.height;
         const tempCtx = BB.ctx(temp);
 
+        // 构建仿射变换矩阵，确保以画布中心为轴进行翻转
         const matrix = compose(
             translate(temp.width / 2, temp.height / 2),
             scale(isHorizontal ? -1 : 1, isVertical ? -1 : 1),
@@ -1021,16 +1025,19 @@ export class KlCanvas {
         );
 
         for (let i = 0; i < this.layers.length; i++) {
+            // 如果指定了 layerIndex，则只翻转该图层，否则翻转全局
             if ((layerIndex || layerIndex === 0) && i !== layerIndex) {
                 continue;
             }
 
+            // 1. 将原图层变换绘制到 temp 上
             tempCtx.save();
             tempCtx.clearRect(0, 0, temp.width, temp.height);
             tempCtx.setTransform(...matrixToTuple(matrix));
             tempCtx.drawImage(this.layers[i].canvas, 0, 0);
             tempCtx.restore();
 
+            // 2. 清空原图层并将 temp 画回
             this.layers[i].context.clearRect(
                 0,
                 0,
@@ -1040,10 +1047,12 @@ export class KlCanvas {
             this.layers[i].context.drawImage(temp, 0, 0);
         }
 
+        // 同步选区
         if (this.selection) {
             this.selection = transformMultiPolygon(this.selection, matrix);
         }
 
+        // 提交历史：因为是全图或特定图层的像素重组，记录 tiles
         const targetLayer = layerIndex === undefined ? undefined : this.layers[layerIndex];
         this.klHistory.push({
             layerMap: createLayerMap(
@@ -1056,12 +1065,19 @@ export class KlCanvas {
         });
     }
 
+    /**
+     * 开放式绘图接口：任何外部工具都可以通过传入一个 callback 接入历史记录管理
+     * @param layerIndex 目标图层
+     * @param operation 绘图指令函数 (ctx) => { ... }
+     */
     // arbitrary drawing operation & focus layer
     drawOperation(layerIndex: number, operation: (ctx: CanvasRenderingContext2D) => void): void {
         const targetLayer = this.layers[layerIndex];
         const ctx = targetLayer.context;
+        // 1. 执行具体的绘图指令（比如画笔的一根线条、滤镜的一个特效）
         operation(ctx);
 
+        // 2. 自动记录历史快照（只要是通过这个函数画的，就不会忘记存历史记录）
         if (!this.klHistory.isPaused()) {
             this.klHistory.push({
                 activeLayerId: targetLayer.id,
@@ -1073,6 +1089,13 @@ export class KlCanvas {
         }
     }
 
+    /**
+     * 简单的图层填充功能（类似于 Photoshop 里的“编辑 -> 填充”）
+     * @param layerIndex 目标图层
+     * @param colorObj 填充颜色
+     * @param compositeOperation 混合模式（如 'source-in'）
+     * @param doClipSelection 是否受当前虚线选区限制
+     */
     layerFill(
         layerIndex: number,
         colorObj: TRgb,
@@ -1081,19 +1104,26 @@ export class KlCanvas {
     ): void {
         const ctx = this.layers[layerIndex].context;
         ctx.save();
+
+        // 判定这是否是一个“纯粹的全图层单色填充”
+        // (没有选区限制，且没有特殊混合模式)
         const isUniformFill =
             !(doClipSelection && this.selection) && compositeOperation === undefined;
         if (compositeOperation) {
             ctx.globalCompositeOperation = compositeOperation as GlobalCompositeOperation;
         }
 
+        // 如果存在选区，将选区路径应用为 Canvas 的剪裁蒙版 (Clip)
+        // 这样接下来画的颜色就不会溢出选区
         let bounds: TIndexBounds | undefined;
         if (doClipSelection && this.selection) {
             const selectionPath = getSelectionPath2d(this.selection);
             ctx.clip(selectionPath);
+            // 计算选区的最小包围盒，用于后续的历史记录切片优化
             bounds = getMultiPolyBounds(this.selection, 'index');
         }
 
+        // 计算选区的最小包围盒，用于后续的历史记录切片优化
         const fill = 'rgba(' + colorObj.r + ',' + colorObj.g + ',' + colorObj.b + ',1)';
         ctx.fillStyle = fill;
         ctx.fillRect(
@@ -1104,6 +1134,13 @@ export class KlCanvas {
         );
         ctx.restore();
 
+        // ----------------------------------------------------
+        // ! [工业级 Hack]：规避 Chrome 浏览器的渲染 Bug
+        // Chromium 引擎在处理极大面积的 fillRect 时，偶尔会出现 1 像素的脏边。
+        // 原作者通过在屏幕左上角(-0.99, -0.99)画一个几乎透明的极其微小的点，
+        // 强制触发 Chrome 的重绘引擎刷洗脏缓存。
+        // 参考工单: https://bugs.chromium.org/p/chromium/issues/detail?id=1281185
+        // ----------------------------------------------------
         // workaround for chrome bug https://bugs.chromium.org/p/chromium/issues/detail?id=1281185
         // TODO remove if chrome updated
         ctx.save();
@@ -1141,32 +1178,49 @@ export class KlCanvas {
             });
         }*/
 
+        // 提交历史记录
         if (!this.klHistory.isPaused()) {
             const targetLayer = this.layers[layerIndex];
             this.klHistory.push({
                 layerMap: createLayerMap(this.layers, {
                     layerId: targetLayer.id,
                     attributes: ['tiles'],
+                    // 极致优化：如果是全屏纯色填充，不需要读取内存切片，
+                    // 直接用 createFillColorTiles 生成数学上的纯色切片存进历史！
                     tiles: isUniformFill
                         ? createFillColorTiles(this.width, this.height, fill)
                         : undefined,
+                    // 如果有选区，只存选区包围盒内的切片
                     bounds,
                 }),
             });
         }
     }
 
+    /**
+     * ! 智能油漆桶工具 (Flood Fill / 魔法棒核心逻辑)
+     * 这是一个极度吃 CPU 性能的像素级计算操作。
+     */
     floodFill(
+        // 目标图层
         layerIndex: number, // index of layer to be filled
+        // 鼠标点击的起始点坐标 (x, y)
         x: number, // starting point
         y: number,
+        // 填充颜色，如果传 null 则是橡皮擦填充
         rgb: TRgb | null, // fill color, if null -> erase
+        // 填充透明度
         opacity: number,
+        // 容差值 (0-255，值越大，相近的颜色越容易被一起填上)
         tolerance: number,
+        // 采样模式 ('current'仅当前层, 'all'所有层合成)
         sampleStr: TFillSampling,
+        // 边缘扩展像素（消除锯齿白边）
         grow: number, // int >= 0 - radius around filled area that is to be filled too
+        // 是否连续（只填充相连的区域，还是全图替换相似色）
         isContiguous: boolean,
     ): void {
+        // 边界保护：点在画布外，或者透明度为0，直接返回
         if (x < 0 || y < 0 || x >= this.width || y >= this.height || opacity === 0) {
             return;
         }
@@ -1177,9 +1231,12 @@ export class KlCanvas {
         if (!['above', 'current', 'all'].includes(sampleStr)) {
             throw new Error('invalid sampleStr');
         }
+
+        // 将矢量选区转化为像素级别的二进制掩码数组 [0,1,1,0,...]
         const selectionMask = this.selection
             ? getBinaryMask(this.selection, this.width, this.height)
             : undefined;
+        // 如果点击的点不在选区内，拒绝填充
         if (selectionMask && selectionMask[y * this.width + x] === 0) {
             // don't fill if outside of selection
             return;
@@ -1190,12 +1247,17 @@ export class KlCanvas {
         let targetCtx;
         let targetImageData;
 
+        // --- 阶段一：准备用于采样的像素数据 (Source Data) ---
         if (sampleStr === 'all') {
+            // “采样所有图层”：需要把当前可见的所有层“拍扁”到一个临时 Canvas 里
             const srcCanvas =
                 this.layers.length === 1 ? this.layers[0].canvas : this.getCompleteCanvas(1);
             const srcCtx = BB.ctx(srcCanvas);
+            // getImageData 是同步的、极耗性能的 CPU/GPU 内存拷贝操作
             const srcImageData = srcCtx.getImageData(0, 0, this.width, this.height);
-            const srcData = srcImageData.data;
+            const srcData = srcImageData.data; // 得到 [r,g,b,a, r,g,b,a...] 的一维大数组
+
+            // 核心算法：用 C/C++ 风格的底层位操作计算出填充区域的掩码 (Mask)
             result = floodFillBits(
                 srcData,
                 selectionMask,
@@ -1209,8 +1271,10 @@ export class KlCanvas {
             );
 
             targetCtx = targetLayer.context;
+            // 获取目标图层的实际像素数组，准备写入
             targetImageData = targetCtx.getImageData(0, 0, this.width, this.height);
         } else {
+            // “仅采样当前层或上一层”：逻辑类似，只是提取 getImageData 的源头不同
             const srcIndex = sampleStr === 'above' ? layerIndex + 1 : layerIndex;
 
             if (srcIndex >= this.layers.length) {
@@ -1239,10 +1303,14 @@ export class KlCanvas {
                     : targetCtx.getImageData(0, 0, this.width, this.height);
         }
 
+        // --- 阶段二：将颜色写入目标图层的像素数组 (Destination Data) ---
         const targetData = targetImageData.data;
         if (rgb) {
+            // 普通油漆桶上色
             if (opacity === 1) {
+                // 不透明：直接覆盖 RGB，最快
                 for (let i = 0; i < this.width * this.height; i++) {
+                    // 如果该像素点被掩码标记为需要填充
                     if (result.data[i] === 255) {
                         targetData[i * 4] = rgb.r;
                         targetData[i * 4 + 1] = rgb.g;
@@ -1251,6 +1319,7 @@ export class KlCanvas {
                     }
                 }
             } else {
+                // 半透明：需要与原像素进行 Alpha 混合数学计算 (BB.mix)
                 for (let i = 0; i < this.width * this.height; i++) {
                     if (result.data[i] === 255) {
                         targetData[i * 4] = BB.mix(targetData[i * 4], rgb.r, opacity);
@@ -1261,6 +1330,8 @@ export class KlCanvas {
                 }
             }
         } else {
+            // 魔术橡皮擦模式 (传入 rgb = null)
+            // 逻辑相似，只是强行把满足条件的像素透明度 (Alpha 通道) 扣为 0 从而实现擦除
             // erase
             if (opacity === 1) {
                 for (let i = 0; i < this.width * this.height; i++) {
@@ -1276,8 +1347,11 @@ export class KlCanvas {
                 }
             }
         }
+
+        // --- 阶段三：将修改后的内存数组一口气推回显存 ---
         targetCtx.putImageData(targetImageData, 0, 0);
 
+        // 原作者调试用的代码被注释掉了
         // const ctx = this.layers[layerIndex].context;
         // ctx.save();
         // ctx.fillStyle = 'rgba(255,0,0,0.2)';
@@ -1289,6 +1363,7 @@ export class KlCanvas {
         // );
         // ctx.restore();
 
+        // 提交历史记录，利用 result.bounds (算法算出的最小影响包围盒) 极大地减小快照体积
         if (!this.klHistory.isPaused()) {
             this.klHistory.push({
                 layerMap: createLayerMap(this.layers, {
@@ -1301,18 +1376,28 @@ export class KlCanvas {
     }
 
     /**
+     * 绘制几何形状 (如矩形、圆形、直线)
+     * @param layerIndex 目标图层索引
+     * @param shapeObj 形状数据对象 (包含起点、终点、颜色、线宽等)
+     */
+    /**
      * draw geometric shape (circle, line, rect)
      * @param layerIndex
      * @param shapeObj
      */
     drawShape(layerIndex: number, shapeObj: TShapeToolObject): void {
+        // [性能防抖] 如果起点和终点完全重合，说明没画出有效图形，直接抛弃
         if (shapeObj.x1 === shapeObj.x2 && shapeObj.y1 === shapeObj.y2) {
             return;
         }
         const targetLayer = this.layers[layerIndex];
+
+        // 如果存在套索选区，将多边形数据转换成原生 Canvas 的 Path2D 对象
         const selectionPath = this.selection
             ? new Path2D(getSelectionPath2d(this.selection))
             : undefined;
+
+        // 调用外部纯函数执行具体的 ctx 绘制，并返回形状在画布上的包围盒(Bounds)
         const bounds = drawShape(targetLayer.context, shapeObj, selectionPath);
 
         // debug
@@ -1322,6 +1407,7 @@ export class KlCanvas {
         ctx.fillRect(bounds.x1, bounds.y1, bounds.x2 - bounds.x1, bounds.y2 - bounds.y1);
         ctx.restore();*/
 
+        // 提交增量历史快照，仅记录 bounds 内的像素瓦片(Tiles)
         if (!this.klHistory.isPaused()) {
             this.klHistory.push({
                 layerMap: createLayerMap(this.layers, {
@@ -1333,12 +1419,17 @@ export class KlCanvas {
         }
     }
 
+    /**
+     * 绘制渐变
+     */
     drawGradient(layerIndex: number, gradientObj: TGradient): void {
         const targetLayer = this.layers[layerIndex];
         const selectionPath = this.selection
             ? new Path2D(getSelectionPath2d(this.selection))
             : undefined;
+        // 执行渐变绘制 (支持线性、径向等，由外部函数处理)
         drawGradient(targetLayer.context, gradientObj, selectionPath);
+        // 渐变通常覆盖面积极大，因此这里没有计算 bounds，而是默认触发该图层的全图重新切片
         if (!this.klHistory.isPaused()) {
             this.klHistory.push({
                 layerMap: createLayerMap(this.layers, {
@@ -1349,20 +1440,29 @@ export class KlCanvas {
         }
     }
 
+    /**
+     * TODO: 需要完整移植该功能吗？
+     * 渲染文本 (支持旋转、描边、选区遮罩)
+     */
     text(layerIndex: number, p: TRenderTextParam): void {
         const targetLayer = this.layers[layerIndex];
+
+        // 调用外部函数在画布上渲染文本，并返回文本原本（未旋转前）的宽高和坐标 rect
         const rect = renderText(
             targetLayer.canvas,
             BB.copyObj(p),
             this.selection ? new Path2D(getSelectionPath2d(this.selection)) : undefined,
         );
 
+        // [细节防御] 添加 2 像素的 padding，加上描边(stroke)宽度的补偿。
+        // 因为 canvas 的文字抗锯齿渲染偶尔会略微溢出标准字体度量 (Font Metrics) 框。
         // add 2, because rect not entirely accurate
         const padding = 2 + (p.stroke ? p.stroke.lineWidth / 2 : 0);
         const changedBounds = transformCoordinateBounds(
             rectToBounds(rect, 'coordinate'),
             compose(translate(p.x, p.y), rotate(-p.angleRad)),
         );
+        // 应用 padding 补偿
         changedBounds.x1 -= padding;
         changedBounds.y1 -= padding;
         changedBounds.x2 += padding;
@@ -1379,41 +1479,61 @@ export class KlCanvas {
                 layerMap: createLayerMap(this.layers, {
                     layerId: targetLayer.id,
                     attributes: ['tiles'],
+                    // 仅保存被文字覆盖的那个框内的切片，极其节省内存！
                     bounds: coordinateBoundsToIndexBounds(changedBounds),
                 }),
             });
         }
     }
 
+    /**
+     * 清空图层 (支持全屏清空、选区内清空、以及透明度锁定模式)
+     */
     eraseLayer(p: {
         layerIndex: number;
+        // Alpha Lock: 锁定透明度 (只影响已有像素)
         useAlphaLock?: boolean; // default false
+        // 是否受套索选区限制
         useSelection?: boolean; // default false
     }): void {
         const targetLayer = this.layers[p.layerIndex];
         const ctx = targetLayer.context;
         ctx.save();
+
         let bounds: TIndexBounds | undefined;
+        // 1. 选区限制
         if (p.useSelection && this.selection) {
             const selectionPath = getSelectionPath2d(this.selection);
             ctx.clip(selectionPath);
+            // 设定剪裁蒙版
             bounds = getMultiPolyBounds(this.selection, 'index');
         }
+
+        // 2. 混合模式控制 (极度关键的 Canvas 技巧)
         if (p.useAlphaLock) {
+            // 源在顶部：画笔只会替换已有像素的颜色，不会改变它们的透明度(Alpha)。
+            // 在透明度锁定的情况下“擦除”，实际上通常是用背景色(比如纯白)去填满有内容的区域。
             ctx.globalCompositeOperation = 'source-atop';
         } else {
+            // 目标抠除：无视画笔的颜色，画笔扫过的地方，原有的像素直接变成纯透明 (黑洞)。
+            // 这是 Web 开发中实现“真·橡皮擦”的唯一标准做法。
             ctx.globalCompositeOperation = 'destination-out';
         }
+        // 执行擦除动作：用一个全屏的矩形盖下去
         ctx.fillStyle = BB.ColorConverter.toRgbStr(getEraseColor());
         ctx.fillRect(0, 0, this.width, this.height);
         ctx.restore();
 
+        // 3. 历史记录极致优化
+        // 如果既没有开启选区，也没有锁定透明度，说明这是一次彻头彻尾的“清空全图层”。
         const isUniformFill = !p.useAlphaLock && !(p.useSelection && this.selection);
         if (!this.klHistory.isPaused()) {
             this.klHistory.push({
                 layerMap: createLayerMap(this.layers, {
                     layerId: targetLayer.id,
                     attributes: ['tiles'],
+                    // 【零内存消耗切片】：如果是全图清空，不要去读像素内存，
+                    // 直接告诉历史栈“给这个图层生成一套纯透明(transparent)的数学切片”。
                     tiles: isUniformFill
                         ? createFillColorTiles(this.width, this.height, 'transparent')
                         : undefined,
@@ -1427,10 +1547,12 @@ export class KlCanvas {
         return this.klHistory;
     }
 
+    /** 返回所有图层的原始数据结构对象 */
     getLayersRaw(): TKlCanvasLayer[] {
         return this.layers;
     }
 
+    /** 返回图层的简化数据（有id和context） */
     getLayers(): {
         id: string;
         canvas: HTMLCanvasElement;
@@ -1453,6 +1575,7 @@ export class KlCanvas {
         });
     }
 
+    /** 返回图层的快速访问数据 */
     getLayersFast(): {
         canvas: HTMLCanvasElement;
         isVisible: boolean;
@@ -1473,6 +1596,7 @@ export class KlCanvas {
         });
     }
 
+    /** 反向查找图层的索引 */
     getLayerIndex(canvasObj: HTMLCanvasElement, doReturnNull?: boolean): null | number {
         for (let i = 0; i < this.layers.length; i++) {
             if (this.layers[i].canvas === canvasObj) {
@@ -1485,6 +1609,7 @@ export class KlCanvas {
         return null;
     }
 
+    /** 旧版遗留Api 返回特定的图层数据结构 */
     getLayerOld(index: number, doReturnNull?: boolean): null | TLayerFromKlCanvas {
         if (this.layers[index]) {
             return {
@@ -1503,6 +1628,7 @@ export class KlCanvas {
         return null;
     }
 
+    /** 返回指定索引的图层对象 */
     getLayer(index: number): TKlCanvasLayer {
         return this.layers[index];
     }
@@ -1585,14 +1711,28 @@ export class KlCanvas {
     }
 
     /**
+     * 【时光机入口】：处理 Undo (撤销) / Redo (重做) 的状态回滚
+     * 当外部的历史记录管理器 (KlHistory) 发生指针回退或前进时，会调用此方法。
+     * 
+     * @param before 撤销/重做 操作【前】的全局状态快照
+     * @param after  撤销/重做 操作【后】(即我们现在要变成的样子) 的全局状态快照
+     */
+    /**
      * called after undo/redo, to apply the changes to the klCanvas.
      * before - before undo/redo was called - equivalent to current state of klCanvas.
      * after - after undo/redo was called.
      */
     updateViaComposed(before: THistoryEntryDataComposed, after: THistoryEntryDataComposed): void {
+        // 1. 恢复画板的物理尺寸 (例如你撤销了一个“裁剪画布”操作)
         this.width = after.size.width;
         this.height = after.size.height;
+
+        // 2. 恢复选区状态 (套索的虚线框也要跟着撤销回退)
         this.selection = after.selection.value;
+        // 3. 恢复最复杂的图层和像素状态
+        // 这是一个类似于 React Virtual DOM Diff 算法的高级函数。
+        // 它会对比 before 和 after 两个庞大的对象树，只把发生了改变的“瓦片(Tiles)”重绘到对应的 Canvas 上。
+        // 并自动处理图层的增加、删除、重命名、排序、透明度变化等。
         this.layers = updateLayersViaComposed(this.layers, before, after);
     }
 

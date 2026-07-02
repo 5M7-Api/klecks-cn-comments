@@ -82,6 +82,10 @@ export function createLayerMap(
     layers: TKlCanvasLayer[],
     ...items: (TLayerMapConfigItem | undefined)[]
 ): Record<TLayerId, THistoryEntryLayer> {
+    // console.debug('createLayerMap() called param items:');
+    // console.dir(items)
+    // console.debug('layers: ')
+    // console.dir(layers)
     // 1. 从传入的变长参数中，解析出【全局兜底配置】。如果没有，默认为 [] (什么都不记录)
     const generic: TLayerMapGeneric = items.find((item) => item && !('layerId' in item)) ?? {
         attributes: [],
@@ -90,6 +94,12 @@ export function createLayerMap(
     const targets: TLayerMapLayer[] = items
         .filter((item) => !!item)
         .filter((item) => 'layerId' in item);
+
+    // console.debug('filter targets: ')
+    // console.dir(targets)
+    // console.debug('generic: ')
+    // console.dir(generic)
+    
     // 3. 遍历当前画布上的真实图层数组，生成历史快照字典
     return Object.fromEntries(
         layers.map((layer, index) => {

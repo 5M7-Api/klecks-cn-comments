@@ -40,19 +40,28 @@ export function clamp(num: number, min: number, max: number): number {
     return num < min ? min : num > max ? max : num;
 }
 
+/** 绕原点旋转 */
 export function rotate(x: number, y: number, deg: number): TVector2D {
+    // 将角度（deg）转换为弧度（theta）
     const theta = deg * (Math.PI / 180);
     const cs = Math.cos(theta);
     const sn = Math.sin(theta);
 
     return {
+        // 新坐标 x' = x*cosθ - y*sinθ
         x: x * cs - y * sn,
+        // 新坐标 y' = x*sinθ + y*cosθ
         y: x * sn + y * cs,
     };
 }
 
+/** 绕任意指定点旋转 */
 export function rotateAround(center: TVector2D, point: TVector2D, deg: number): TVector2D {
+    // 第一步：平移（将旋转中心平移到原点）
+    // 计算待旋转点相对于旋转中心的偏移量（相对坐标）
     const rot = rotate(point.x - center.x, point.y - center.y, deg);
+    // 第二步：反向平移（将坐标还原回原坐标系）
+    // 将旋转后的相对坐标，加上旋转中心的绝对坐标
     rot.x += center.x;
     rot.y += center.y;
     return rot;
