@@ -283,6 +283,7 @@ export class ProjectViewport {
             this.ctx.restore();
         }
 
+        // TODO：大量图层会不适用此结构
         // ==========================================
         // 【图层合成引擎 (Layer Compositing)】
         // 遍历这幅画里的每一个图层，并按照顺序叠画在一起
