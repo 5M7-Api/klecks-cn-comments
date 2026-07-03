@@ -351,7 +351,7 @@ export class KlApp {
             });
         }
 
-        // 实际的绘画数据内容
+        // ! 实际的绘画数据内容（图层和色彩操作）
         this.klCanvas = new KL.KlCanvas(this.klHistory, this.embed ? -1 : 1);
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
@@ -842,7 +842,7 @@ export class KlApp {
             left: '0',
             top: '0',
         });
-        // 画板实时更新系统
+        // ! 画板实时更新系统，Easel类靠此驱动器更新
         this.easelProjectUpdater = new EaselProjectUpdater({
             klCanvas: this.klCanvas,
             easel: this.easel,
@@ -1700,7 +1700,6 @@ export class KlApp {
         this.layersUi = new KL.LayersUi({
             klCanvas: this.klCanvas,
             onSelect: (layerIndex, pushHistory) => {
-                console.log('layersUi onSelect', layerIndex, pushHistory); // debug
                 const activeLayer = this.klCanvas.getLayer(layerIndex);
                 setCurrentLayer(activeLayer);
 

@@ -207,8 +207,8 @@ export class SelectionRenderer {
     // overwrite project selection
     setRenderedSelection(renderedSelection?: MultiPolygon, isImmediate?: boolean): void {
         // debug
-        console.log('SelectionRenderer 预览选区更新: ' );
-        console.dir(renderedSelection);
+        // console.log('SelectionRenderer 预览选区更新: ' );
+        // console.dir(renderedSelection);
 
         if (this.renderedSelection === renderedSelection) {
             return;

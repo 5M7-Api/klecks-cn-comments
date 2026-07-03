@@ -261,6 +261,14 @@ export const createCheckerDataUrl = (function () {
 })();
 
 /**
+ * 【核心工具函数】：平滑缩放画布
+ * @param canvas 目标画布 - 它的尺寸和像素内容将被直接就地修改 (Destructive Modification)
+ * @param w 目标宽度
+ * @param h 目标高度
+ * @param tmp1 可选的离屏过渡画布，用于复用内存，防止频繁 GC (垃圾回收) 导致卡顿
+ * @param tmp2 可选的离屏过渡画布，用于复用内存，防止频繁 GC 导致卡顿
+ */
+/**
  * smooth resize image
  * @param canvas canvas - will be resized (modified)
  * @param w
@@ -275,6 +283,10 @@ export function resizeCanvas(
     tmp1?: HTMLCanvasElement,
     tmp2?: HTMLCanvasElement,
 ): void {
+    /**
+     * 【内部数学助手】：计算新旧尺寸基于 2 的幂次指数 (Exponents)
+     * 步进缩放的核心是“每次缩小一半”，所以需要知道图片尺寸在 2 的几次方范围。
+     */
     //determine base 2 exponents of old and new size
     function getBase2Obj(oldW: number, oldH: number, newW: number, newH: number) {
         const result = {
@@ -283,6 +295,7 @@ export function resizeCanvas(
             newWidthEx: Math.ceil(Math.log2(newW)),
             newHeightEx: Math.ceil(Math.log2(newH)),
         };
+        // 防御边界：确保起始指数不会小于目标指数
         result.oldWidthEx = Math.max(result.oldWidthEx, result.newWidthEx);
         result.oldHeightEx = Math.max(result.oldHeightEx, result.newHeightEx);
         return result;
@@ -293,12 +306,21 @@ export function resizeCanvas(
     }
     w = Math.max(w, 1);
     h = Math.max(h, 1);
+
+    // =========================================================================
+    // 分支一：【下采样 / 缩小图片】 (Downscaling - 核心技术难点)
+    // 采用步进式每次减半的策略，防止像素大面积丢失导致的锯齿。
+    // =========================================================================
     if (w <= canvas.width && h <= canvas.height) {
+        // 资源池优化：如果外部没有传入临时的 Canvas，就地创建它们。
+        // 如果外部传入了，就可以直接复用这块显存，免去了动态分配内存的系统开销。
         tmp1 = !tmp1 ? createCanvas() : tmp1;
         tmp2 = !tmp2 ? createCanvas() : tmp2;
 
         const base2 = getBase2Obj(canvas.width, canvas.height, w, h);
 
+        // 初始化第一步的中间画布大小（向上对齐到最近的 2 的幂次方）
+        // 规避特殊情况：例如从 900 缩放到 600，跨度太小则无需对齐 2 的幂次，直接用目标宽高即可
         //initially scale to a base of 2. unless new size is too close to old. e.g. sizing from 900 to 600
         tmp2.width = base2.oldWidthEx > base2.newWidthEx ? Math.pow(2, base2.oldWidthEx) : w;
         tmp2.height = base2.oldHeightEx > base2.newHeightEx ? Math.pow(2, base2.oldHeightEx) : h;
@@ -306,12 +328,15 @@ export function resizeCanvas(
         tmp2.getContext('2d')!.save();
 
         let ew, eh;
+        // 经典的“乒乓缓冲区 (Ping-Pong Buffers)”设计！
+        // buffer1 和 buffer2 会在循环中不断交换身份，A 画到 B，下一步 B 再画到 A
         let buffer1 = tmp1,
             buffer2 = tmp2;
 
         ew = base2.oldWidthEx;
         eh = base2.oldHeightEx;
 
+        // 【步骤 1.1】：将原始大图拉伸填充到第一个 2 的幂次方中间画布 (buffer2) 上
         let bufferCtx = buffer2.getContext('2d')!;
         bufferCtx.imageSmoothingEnabled = true;
         bufferCtx.imageSmoothingQuality = 'high';
@@ -321,6 +346,8 @@ export function resizeCanvas(
         let currentWidth = buffer2.width;
         let currentHeight = buffer2.height;
 
+        // 【步骤 1.2】：步进式核心循环 —— 每次将画布尺寸砍掉一半
+        // 只要宽或高的指数还没降到目标尺寸的范围内，就持续折半渲染
         //stepwise half the size
         for (; ew > base2.newWidthEx || eh > base2.newHeightEx; ew--, eh--) {
             bufferCtx = buffer1.getContext('2d')!;
@@ -328,13 +355,16 @@ export function resizeCanvas(
             bufferCtx.imageSmoothingQuality = 'high';
             bufferCtx.globalCompositeOperation = 'copy';
 
+            // 如果当前宽度还需要减半，则除以 2；如果已经降到目标内了，保持宽度不动
             const newWidth = ew > base2.newWidthEx ? currentWidth / 2 : currentWidth;
             const newHeight = eh > base2.newHeightEx ? currentHeight / 2 : currentHeight;
 
+            // 动态修改离屏画布的物理尺寸，腾出干净的像素空间
             //buffer also needs to be properly sized, unfortunately
             buffer1.width = newWidth;
             buffer1.height = newHeight;
 
+            // 将 buffer2 的图像以高质量平滑缩放 50%，绘制到 buffer1 上
             bufferCtx.drawImage(
                 buffer2,
                 0,
@@ -346,27 +376,38 @@ export function resizeCanvas(
                 newWidth,
                 newHeight,
             );
+            // 更新当前尺寸记录
             currentWidth = newWidth;
             currentHeight = newHeight;
 
+            // 【指针指针大调换】：乒乓交替。把刚刚画好的 buffer1 作为下一步的源图片，
+            // 空出来的 buffer2 作为下一步的目标画布，循环往复。
             //swap
             const tmp = buffer1;
             buffer1 = buffer2;
             buffer2 = tmp;
         }
 
+        // 【步骤 1.3】：此时图片已经被安全地缩放到非常接近目标尺寸了。
+        // 正式改变原画布 (canvas) 的大小为最终的目标尺寸 w 和 h。
         //when no longer can be halved, bring to target size
         canvas.width = w;
         canvas.height = h;
+        // 执行最后一笔精细渲染：把经过数次减半平滑后的临时数据 (此时在 buffer2 中) 一步画到位
         const canvasCtx = canvas.getContext('2d')!;
         canvasCtx.save();
         canvasCtx.imageSmoothingEnabled = true;
         canvasCtx.imageSmoothingQuality = 'high';
         canvasCtx.drawImage(buffer2, 0, 0, currentWidth, currentHeight, 0, 0, w, h);
+        // 善后恢复状态
         canvasCtx.restore();
         tmp1.getContext('2d')!.restore();
         tmp2.getContext('2d')!.restore();
     } else if (w >= canvas.width && h >= canvas.height) {
+        // =========================================================================
+    // 分支二：【上采样 / 放大图片】 (Upscaling)
+    // 浏览器对于放大图片的插值平滑处理得非常好，不需要使用复杂的步进法，直接单次放大。
+    // =========================================================================
         tmp1 = !tmp1 ? createCanvas() : tmp1;
         tmp1.width = w;
         tmp1.height = h;
@@ -374,33 +415,59 @@ export function resizeCanvas(
         tmp1Ctx.save();
         tmp1Ctx.imageSmoothingEnabled = true;
         tmp1Ctx.imageSmoothingQuality = 'high';
+        // 直接在临时画布上画出放大后的精细图像
         tmp1Ctx.drawImage(canvas, 0, 0, w, h);
         tmp1Ctx.restore();
 
+        // 改变原画布物理尺寸（这一步会瞬间清空原画布的所有像素）
         canvas.width = w;
         canvas.height = h;
+        // 把刚才在临时画布上放大好的像素无损贴回来
         canvas.getContext('2d')!.drawImage(tmp1, 0, 0);
     } else {
+        // =========================================================================
+        // 分支三：【非对称各向异性缩放】 (Anisotropic Mixed Scaling)
+        // 奇葩场景：用户的操作导致宽度在“缩小”，但高度却在“放大”（或者反过来）。
+        // =========================================================================
+        // 解耦降维：既然横纵轴趋势相反，那就拆成两步递归调用！
+        // 第一步：只处理宽度的目标缩放，高度保持原样。这会完美触发上面的分支一或分支二。
         resizeCanvas(canvas, w, canvas.height, tmp1, tmp2);
+        // 第二步：在宽度已经处理好的基础上，再去单独缩放高度到目标 h。
         resizeCanvas(canvas, w, h, tmp1, tmp2);
     }
 }
-
+/**
+ * 【通道转换引擎】：将画布像素的亮度（明暗）直接转换为透明度（Alpha 通道）
+ * 
+ * @param canvas 需要被就地修改的离屏 Canvas 对象
+ */
 /**
  * puts naive greyscale version of image into alpha channel.
  * only writes a, doesn't write rgb
  * @param canvas
  */
 export function convertToAlphaChannelCanvas(canvas: HTMLCanvasElement): void {
+    // 1. 获取整个画布的所有原始 RGBA 像素数据（ImageData 一维字节数组）
     const imdat = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+    // 2. 遍历每一个像素。由于每个像素占 4 个位置 [R, G, B, A]，所以步长为 4
     for (let i = 0; i < imdat.data.length; i += 4) {
+        // 【优化边界】：如果这个像素原本就已经完全透明（Alpha 是 0），直接跳过
         if (imdat.data[i + 3] === 0) {
             continue;
         }
+        // 3. 【核心数学公式】：重写 Alpha 通道 (imdat.data[i + 3])
+        // R (红色): imdat.data[i]
+        // G (绿色): imdat.data[i + 1]
+        // B (蓝色): imdat.data[i + 2]
+        // A (透明度): imdat.data[i + 3]
         imdat.data[i + 3] =
+        // 步骤 A：(R + G + B) / 3 计算该像素的平均灰度值（即明暗度，0 ~ 255）
             ((imdat.data[i] + imdat.data[i + 1] + imdat.data[i + 2]) / 3) *
+            // 步骤 B：乘以原始透明度的百分比 (A / 255)
+            // 这一步至关重要！如果原本像素就有半透明度，必须等比叠加，防止透明度边缘失真
             (imdat.data[i + 3] / 255);
     }
+    // 4. 将修改后的像素数据重新写回画布，更新物理像素内容
     canvas.getContext('2d')!.putImageData(imdat, 0, 0);
 }
 

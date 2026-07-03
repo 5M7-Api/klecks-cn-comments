@@ -29,6 +29,7 @@ export class EaselProjectUpdater<T extends string> {
         this.update();
     }
 
+    // TODO: 这个方法提笔才调用，需要优化layer的循环吗？
     /**
      * 同步更新：将 KlCanvas 数据模型推送到渲染器
      */
@@ -52,13 +53,15 @@ export class EaselProjectUpdater<T extends string> {
                 this.compositeCanvas = undefined;
             }
         }
-
+        console.log('EaselProjectUpdater.update layer: ');
+        console.dir(layers);
         // 2. 映射层：Easel 并不直接操作 KlCanvas 内部引用，而是读取一份结构化的副本
         const compositeCanvas = this.compositeCanvas;
         this.easel.setProject({
             width,
             height,
             layers: layers.map((layer) => {
+      
                 return {
                     // 【核心黑魔法】：函数式惰性求值
                     // 并没有在这里直接进行昂贵的滤镜运算，而是返回一个函数。

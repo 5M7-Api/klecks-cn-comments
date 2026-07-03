@@ -319,7 +319,9 @@ export function rectToBounds<T extends TBoundsType>(
     const y2 = rect.y + rect.height;
     return (
         type === 'index'
+        // 离散像素索引：最大索引必须减去 1 像素偏移（比如宽度为 100，最大索引是 99）
             ? { type: 'index', x1: rect.x, y1: rect.y, x2: x2 - 1, y2: y2 - 1 }
+            // 连续几何坐标：最大边界就是 x2, y2，不作任何偏移
             : { type: 'coordinate', x1: rect.x, y1: rect.y, x2, y2 }
     ) as T extends 'index' ? TIndexBounds : TCoordinateBounds;
 }
