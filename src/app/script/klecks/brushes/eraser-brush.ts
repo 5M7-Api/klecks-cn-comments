@@ -69,6 +69,7 @@ export class EraserBrush {
         this.context.save();
 
         // --- 核心：设置图像混合模式 ---
+        // TODO: isBaseLayer虽然限定背景色不会被擦除，实际上调整图层位置还是会被擦除，应该直接在透明格层级调换底色
         if (this.isBaseLayer) {
             // ? 被透明背景固定，使用底色覆盖会不会更好？
             // 如果是最底层，根据画布是否是透明背景来决定是“挖空”还是“覆盖背景色”
@@ -84,8 +85,10 @@ export class EraserBrush {
             this.context.globalCompositeOperation = 'destination-out';
         }
 
+        // ? 这段逻辑可以作为边缘柔和的笔刷的逻辑参考
         // --- 生成柔和边缘的橡皮擦笔尖 ---
         // 创建一个从中心到边缘的径向渐变
+        // 底层建立了一个严格以 (size, size) 为圆心、以 size 为半径的圆
         const radgrad = this.context.createRadialGradient(size, size, 0, size, size, size);
         // 锐度计算：基于透明度，透明度越低，边缘越柔和。
         let sharpness = Math.pow(opacity, 2);
@@ -93,6 +96,7 @@ export class EraserBrush {
         sharpness = Math.max(0, Math.min((size - 1) / size, sharpness));
 
         // 透明度非线性映射，让力度变化在视觉上更自然
+        // ! Ease-Out（减速曲线） 数学映射
         const oFac = Math.max(0, Math.min(1, opacity));
         const localOpacity = 2 * oFac - oFac * oFac;
 
@@ -175,7 +179,7 @@ export class EraserBrush {
     }
 
     // ----------------------------------- public -----------------------------------
-    constructor() {}
+    constructor() { }
 
     // ---- interface ----
     /**
@@ -196,7 +200,8 @@ export class EraserBrush {
 
         // 2. 初始化脏矩形追踪
         this.changedTiles = [];
-        this.isBaseLayer = 0 === this.layer.index;
+        // this.isBaseLayer = 0 === this.layer.index;
+
 
         p = Math.max(0, Math.min(1, p));
         const localOpacity = this.useOpacityPressure ? this.opacity * p * p : this.opacity;
@@ -282,7 +287,7 @@ export class EraserBrush {
             ? getMultiPolyBounds(this.selection, 'index')
             : undefined;
         this.changedTiles = [];
-        this.isBaseLayer = 0 === this.layer.index;
+        // this.isBaseLayer = 0 === this.layer.index;
 
         // 更新最后输入位置，这样如果用户连续 Shift+Click，可以折线相连
         this.lastInput.x = x2;
