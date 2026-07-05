@@ -195,7 +195,7 @@ export class KlCanvas {
         // 3. 剥离旧图层：保留图层栈的第 0 层，删掉上面的所有额外图层，为重置腾出空间
         this.layers.splice(1, Math.max(0, this.layers.length - 1));
 
-         // ! 关键操作：暂停历史记录记录。
+        // ! 关键操作：暂停历史记录记录。
         // 在组装新画布期间，不触发任何 Undo/Redo 的切片追踪。
         this.klHistory.pause(true);
         // ? 这段代码catch吗？
@@ -259,9 +259,9 @@ export class KlCanvas {
                     height: this.height,
                 },
                 selection: { value: this.selection },
-                 // 默认将焦点激活在最上面的那层图层
+                // 默认将焦点激活在最上面的那层图层
                 activeLayerId: this.layers[this.layers.length - 1].id,
-               // 遍历所有刚组装好的图层，生成一个结构字典 (LayerMap) 存入基准历史栈
+                // 遍历所有刚组装好的图层，生成一个结构字典 (LayerMap) 存入基准历史栈
                 layerMap: createLayerMap(this.layers, {
                     // 保存全部属性 (尺寸、透明度、混合模式)
                     attributes: 'all',
@@ -525,7 +525,7 @@ export class KlCanvas {
             this.klHistory.pause(false);  // 恢复历史记录
         }
         // 重排行号
-        this.updateIndices(); 
+        this.updateIndices();
 
         // 5. 将“新建图层”这一动作压入历史撤销栈
         if (!this.klHistory.isPaused()) {
@@ -535,15 +535,15 @@ export class KlCanvas {
                 layerMap: createLayerMap(
                     this.layers,
                     // 旧图层仅仅改变了排序索引，不保存像素
-                    { attributes: ['index'] }, 
+                    { attributes: ['index'] },
                     {
                         layerId,
                         // 新图层保存所有属性
                         attributes: 'all',
-                       // [极限优化]：如果新建的是白板图层，不要去切片，直接告诉历史系统“全是透明的”
+                        // [极限优化]：如果新建的是白板图层，不要去切片，直接告诉历史系统“全是透明的”
                         tiles: data
-                            ? undefined 
-                            : createFillColorTiles(this.width, this.height, 'transparent'), 
+                            ? undefined
+                            : createFillColorTiles(this.width, this.height, 'transparent'),
                     },
                 ),
             });
@@ -806,6 +806,7 @@ export class KlCanvas {
 
     /**
      * 将上层图层合并到下层图层中
+     * TODO：sai2如果存在被隐藏的图层，则无法合并！透明度则合并该透明度的图层
      */
     mergeLayers(
         layerBottomIndex: number,
@@ -887,6 +888,7 @@ export class KlCanvas {
 
     /**
      * 合并所有可见图层到最底层 (Flatten Image)
+     * TODO：sai2如果存在被隐藏的图层，则无法合并！透明度则合并该透明度的图层
      */
     mergeAll(): number | false {
         // 1. 安全检查：如果本来就只有一层，无需合并
@@ -903,7 +905,6 @@ export class KlCanvas {
         // 3. 遍历所有上层图层，逐个渲染到第 0 层
         for (let i = 1; i < this.layers.length; i++) {
             const layer = this.layers[i];
-             // TODO: sai2如果存在被隐藏的图层，则无法合并！透明度则合并该透明度的图层
             // 【性能优化】：被隐藏的图层直接忽略，不参与最终的像素合成
             if (!layer.isVisible || layer.opacity === 0) {
                 continue;
