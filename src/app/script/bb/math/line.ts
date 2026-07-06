@@ -515,6 +515,15 @@ export class SplineInterpolator {
 }
 
 /**
+ * 【非线性样条曲线生成器】：基于幂函数 x^n [在 0 到 1 区间内] 生成滑块控制曲线
+ * 
+ * @param startVal 滑块代表的真实最小值（例如笔刷最小尺寸 0.5px）
+ * @param endVal 滑块代表的真实最大值（例如笔刷最大尺寸 200px）
+ * @param stepSize 采样步长（例如 0.1，代表将滑块总长度 0~1 拆成 10 个核心锚点）
+ * @param exponent 幂函数的指数 n（默认值 = 2，即二次抛物线 x²）
+ * @returns 返回一个锚点二维数组，格式为：[[UI进度0, 物理值], [UI进度0.1, 物理值], ..., [UI进度1, 物理值]]
+ */
+/**
  * input for a spline, following curve of a power function x^n [0 - 1]
  * returns [[0, startVal], ..., [1, endVal]]
  */
@@ -524,14 +533,23 @@ export function powerSplineInput(
     stepSize: number,
     exponent: number = 2,
 ): TSplineInputPoints {
+    // 【内部微型工具】：将浮点数精准截断并四舍五入到小数点后 dec 位
+    // 目的：解决 JS 浮点数运算精度灾难（例如避免产生 0.1 + 0.2 = 0.30000000000000004 这样的数字）
     function round(v: number, dec: number): number {
         return Math.round(v * Math.pow(10, dec)) / Math.pow(10, dec);
     }
 
+    // 从 0 (滑块最左端) 循环到 1 (滑块最右端)，每次前进 stepSize (0.1)
     const resultArr: TSplineInputPoints = [];
     for (let i = 0; i <= 1; i += stepSize) {
         resultArr.push([
+            // 元素 1：UI 进度位置 x（归一化的 0 ~ 1 值，保留 4 位小数）
             round(i, 4),
+            // 元素 2：物理数值 y（运用核心公式映射出来的真实画笔尺寸，保留 4 位小数）
+            // 公式说明：
+            // Math.pow(i, exponent) 算出非线性比例因子 (i^2)
+            // (endVal - startVal) 是总区间的物理长度 (例如 200 - 0.5 = 199.5)
+            // 加上 startVal 确保曲线起点完美落在最小值处
             round(startVal + Math.pow(i, exponent) * (endVal - startVal), 4),
         ]);
     }

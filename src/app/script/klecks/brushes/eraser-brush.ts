@@ -23,6 +23,7 @@ export class EraserBrush {
     // 压力控制透明度
     private useOpacityPressure: boolean = false;
     // 画布背景是否透明
+    // TODO：sai2背景是不可擦除的，这里可擦除。
     private isTransparentBG: boolean = false;
 
     // --- 引擎上下文依赖 ---
@@ -200,7 +201,7 @@ export class EraserBrush {
 
         // 2. 初始化脏矩形追踪
         this.changedTiles = [];
-        // this.isBaseLayer = 0 === this.layer.index;
+        this.isBaseLayer = 0 === this.layer.index;
 
 
         p = Math.max(0, Math.min(1, p));
@@ -287,7 +288,7 @@ export class EraserBrush {
             ? getMultiPolyBounds(this.selection, 'index')
             : undefined;
         this.changedTiles = [];
-        // this.isBaseLayer = 0 === this.layer.index;
+        this.isBaseLayer = 0 === this.layer.index;
 
         // 更新最后输入位置，这样如果用户连续 Shift+Click，可以折线相连
         this.lastInput.x = x2;

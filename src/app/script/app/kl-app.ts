@@ -1479,6 +1479,7 @@ export class KlApp {
                 }
             }
 
+            // ! 此处切换了笔刷目录下的笔刷工具
             currentBrushId = brushId;
             currentBrushUi = brushUiMap[brushId];
             currentBrushUi.setColor(currentColor);
