@@ -791,37 +791,74 @@ export class Easel<GToolId extends string> {
         this.renderLoop();
     }
 
+    /** 
+     * 【项目挂载与重绘】：将底层的数据项目（图层、选区、尺寸）挂载到显示画架上 
+     * 
+     * @param project 包含画布尺寸、图层树和矢量选区的项目数据对象
+     */
     /** update and render */
     setProject(project: TEaselProject): void {
+        // 1. 保存项目数据引用
         this.project = project;
+        // 2. 将数据下发给底层的 Viewport（视口渲染器）
+        // Viewport 是实际负责用 WebGL/Canvas API 把图层画到屏幕上的核心组件
         this.viewport.setProject({
             width: this.project.width,
             height: this.project.height,
             layers: this.project.layers,
         });
+        // 3. 将选区数据下发给选区渲染器（负责画那种跑马灯虚线或遮罩）
         this.selectionRenderer.setSelection(this.project.selection);
+        // 4. 通知当前正在使用的工具：“选区数据变了，请更新你的内部状态！”
+        // 比如魔棒工具可能需要根据新选区重新计算填充边界
         this.getActiveTool().onUpdateSelection?.(this.project.selection);
         this.requestRender();
     }
 
+    /** 
+     * 【画架物理尺寸响应】：当外部容器（如浏览器窗口、UI 面板折叠展开）改变大小时触发
+     * 注意：这里的 width 和 height 是屏幕 UI 的像素，不是画板文档的物理像素！
+     * 
+     * @param width 新的屏幕视口宽度
+     * @param height 新的屏幕视口高度
+     */
     /** update and render */
     setSize(width: number, height: number): void {
+        // ==========================================
+        // 【核心黑魔法：计算当前屏幕正中心到底“盯”着画布的哪个像素】
+        // ==========================================
+        // 1. 获取当前的变换矩阵（包含了平移、缩放、旋转）
         const m = createMatrixFromTransform(this.viewport.getTransform());
+        // 2. 将矩阵【求逆 (inverse)】！
+        // 3. 把屏幕正中心的坐标 (this.width / 2, this.height / 2) 丢进逆矩阵计算
+        // 结果 canvasCenterPoint 就是此刻屏幕正中心对应的【画板原始物理坐标】
         const canvasCenterPoint = applyToPoint(inverse(m), {
             x: this.width / 2,
             y: this.height / 2,
         });
 
+        // ==========================================
+        // 【应用新的物理尺寸】
+        // ==========================================
         this.width = width;
         this.height = height;
+        // 重新设置顶层 SVG 交互层的大小（用于绘制光标、选区蚂蚁线）
         BB.setAttributes(this.svgEl, {
             width: '' + this.width,
             height: '' + this.height,
         });
+        // 通知子组件容器大小发生变化
         this.selectionRenderer.setSize(width, height);
         this.getActiveTool().onResize?.(width, height);
         this.viewport.setSize(width, height);
+
+        // ==========================================
+        // 【视觉焦点还原】
+        // ==========================================
         const transform = this.viewport.getTransform();
+        // 创建一个新的变换矩阵状态
+        // 要求：保持原有的缩放比例 (transform.scale) 和旋转角度 (transform.angleDeg)
+        // 但是要保证：【新的屏幕正中心 (this.width / 2, this.height / 2)】 依然严格对齐刚才算出来的【画板物理坐标 (canvasCenterPoint)】
         this.setTargetTransform(
             createTransform(
                 {
@@ -832,6 +869,7 @@ export class Easel<GToolId extends string> {
                 transform.scale,
                 transform.angleDeg,
             ),
+            // isInstant = true，不要带平滑过渡动画，瞬间完成
             true,
         );
 
@@ -842,24 +880,36 @@ export class Easel<GToolId extends string> {
         this.doRender = true;
     }
 
+    /** 获取当前真实的视口变换状态（包含坐标 x/y, 缩放比例 scale, 旋转角度 angleDeg） */
     getTransform(): TViewportTransform {
+        // 第二个参数 true 代表 isInstant（瞬间完成）。
+        // 这意味着忽略所有平滑动画（如缓动），直接把镜头切到指定的矩阵坐标。
         return this.viewport.getTransform();
     }
 
+    /** 
+     * 瞬间设置视口变换状态（常用于重置视图、撤销恢复时的视图对齐）
+     */
     setTransform(transform: TViewportTransform): void {
         this.setTargetTransform(transform, true);
     }
 
+    /** 
+     * 【核心管线】：切换当前绘图工具 
+     */
     setTool(toolId: GToolId): void {
+        // 1. 【防抖/幂等防御】：如果选中的就是当前正在用的工具，直接丢弃，防止重复触发昂贵的卸载/装载逻辑。
         if (toolId === this.toolId) {
             return;
         }
         this.toolId = toolId;
+        // 调用新工具的 activate 生命周期钩子，并把当前鼠标/画笔的坐标告诉它。
         this.toolsMap[this.toolId].activate?.(this.cursorPos);
+        // 这是一个非常经典的发布-订阅 (Pub-Sub) 模式应用，见下方深度解析。
         Object.values<TEaselTool>(this.toolsMap).forEach((tool) => tool.onTool?.(this.toolId));
-        this.onChangeTool(toolId);
-        this.updateToolSvgs();
-        this.updateDoubleTapPointerTypes();
+        this.onChangeTool(toolId);// 触发顶层回调，通知外部 UI 界面（比如让工具栏上对应的图标高亮变蓝）
+        this.updateToolSvgs();// 更新工具在视图层注入的 SVG UI（比如选区工具专属的十字光标或控制点）
+        this.updateDoubleTapPointerTypes(); // 更新双击逻辑（某些工具在触控笔双击时有特殊行为）
         this.requestRender();
     }
 
@@ -867,7 +917,15 @@ export class Easel<GToolId extends string> {
         return this.toolId;
     }
 
+    /** 
+     * 相对平移画面（常用于按住空格键拖拽画布，或触控板双指滑动）
+     * @param dX 水平移动增量 (Delta X)
+     * @param dY 垂直移动增量 (Delta Y)
+     */
     translate(dX: number, dY: number): void {
+        // 注意：这里读取的是 targetTransform（目标状态）而不是当前真实状态。
+        // 这是为了支持“高频平滑滚动”。如果用户疯狂滚动鼠标滚轮，系统会累加一个“目标终点”，
+        // 渲染引擎会在之后的几帧里平滑地靠拢过去。
         const transform = this.targetTransform;
         this.setTargetTransform({
             ...transform,
@@ -876,19 +934,39 @@ export class Easel<GToolId extends string> {
         });
     }
 
+    /**
+     * 【焦点缩放】：以屏幕上的某个点为圆心，对画布进行放大或缩小
+     * 
+     * @param factor 缩放乘数（比如 1.1 代表放大 10%，0.9 代表缩小 10%）
+     * @param viewportX 缩放中心的屏幕 X 坐标（鼠标悬停点）
+     * @param viewportY 缩放中心的屏幕 Y 坐标（鼠标悬停点）
+     */
     scale(factor: number, viewportX?: number, viewportY?: number): void {
         const before = this.targetTransform;
         const viewportRect = { width: this.width, height: this.height };
+
+        // 1. 【确定缩放锚点】：
+        // 如果传入了坐标（比如滚轮缩放、双指捏合），就以手势中心为锚点。
+        // 如果没传（比如点了 UI 上的“放大”按钮），默认以屏幕正中心为锚点。
         viewportX = viewportX ?? viewportRect.width / 2;
         viewportY = viewportY ?? viewportRect.height / 2;
 
+        // 2. 【状态降维：转换为元属性 (Meta Transform)】
+        // 这是一个极度巧妙的封装。它算出：当前屏幕上的这个点 (viewportX, Y)，
+        // 对应着画板文档里的哪个物理像素点 (canvasP)。
         const metaTransform = toMetaTransform(before, { x: viewportX, y: viewportY });
+
+        // 3. 【执行缩放并限幅】
+        // 乘上缩放系数，并死死卡在系统允许的最大/最小缩放比之内（防止被无限放大到内存溢出，或缩小到看不见）
         metaTransform.scale = BB.clamp(
             metaTransform.scale * factor,
             EASEL_MIN_SCALE,
             EASEL_MAX_SCALE,
         );
 
+        // 4. 【重建并应用矩阵】
+        // 要求：保持刚才算出来的屏幕锚点 (viewportP) 和 画板像素点 (canvasP) 的对应关系绝对不变！
+        // 只改变缩放倍率 (scale)。底层会自动推算出所需的各种 x/y 偏移量。
         this.setTargetTransform(
             createTransform(
                 metaTransform.viewportP,
@@ -899,24 +977,41 @@ export class Easel<GToolId extends string> {
         );
     }
 
+    /**
+     * 【一键重置】：将画布恢复到 100% 原始大小，并居中
+     */
     resetTransform(isImmediate?: boolean): void {
+        // 获取预设的默认矩阵
         const transform = this.getResetTransform();
+        // 推送状态
         this.setTargetTransform(transform, isImmediate);
         this.requestRender();
     }
 
+    /**
+     * 【自适应屏幕 (Fit to Screen)】：智能缩放画布，使其刚好铺满或塞入当前浏览器视口
+     * 
+     * @returns boolean 是否真的发生了视图改变
+     */
     fitTransform(isImmediate?: boolean): boolean {
+        // 拿到现在的真实矩阵
         const oldTransform = this.viewport.getTransform();
+        // 计算出如果“自适应”应该变成什么矩阵
         const transform = this.getFitTransform();
 
+        // 1. 【脏检查 (Dirty Check)：差分比对】
         const isPositionChanged = transform.x !== oldTransform.x || transform.y !== oldTransform.y;
         const isScaleOrAngleChanged =
             transform.scale !== oldTransform.scale || transform.angleDeg !== oldTransform.angleDeg;
 
+         // 2. 【性能防御：无操作拦截】
+        // 如果计算出来的矩阵和现在的矩阵一模一样（比如用户连点了两次“适应屏幕”），
+        // 直接 return false，终止后续所有的动画计算和重绘流水线。
         if (!isPositionChanged && !isScaleOrAngleChanged) {
             return false;
         }
 
+        // 3. 只有真正变化了，才推送新状态
         this.setTargetTransform(transform, isImmediate);
         return true;
     }
@@ -941,31 +1036,54 @@ export class Easel<GToolId extends string> {
         }
     }
 
+    /**
+     * 【画布旋转】：以屏幕正中心为轴，旋转整个画布
+     * 
+     * @param angleDeg 角度（度数）
+     * @param isRelative 是否为相对旋转（true: 在当前基础上累加；false: 直接设置绝对角度）
+     */
     setAngleDeg(angleDeg: number, isRelative: undefined | boolean) {
+        // 1. 获取目标状态与矩阵
         const viewportTransform = this.targetTransform;
         const viewportMat = createMatrixFromTransform(viewportTransform);
+
+        // 2. 锁定屏幕正中心点 (viewportCenterP)
         const viewportRect = { width: this.width, height: this.height };
         const viewportCenterP = {
             x: viewportRect.width / 2,
             y: viewportRect.height / 2,
         };
+
+        // 3. 【角度标准化】：防止数值爆炸
+        // 如果用户疯狂旋转 10 圈，角度可能会变成 3600度。
+        // minimizeAngleDeg 会将其精简为 0~360 或 -180~180 之间的等效角度。
         const newAngleDeg = minimizeAngleDeg(
             isRelative ? viewportTransform.angleDeg + angleDeg : angleDeg,
         );
 
+        // 4. 【锚点重建矩阵】
+        // 要求：不管怎么转，【屏幕的正中心】 必须始终对准 【旋转前屏幕中心对应的画板物理像素】！
+        // applyToPoint(inverse(viewportMat), viewportCenterP) 就是在用逆矩阵找那个画板像素点。
         const newViewportTransform = createTransform(
             viewportCenterP,
             applyToPoint(inverse(viewportMat), viewportCenterP),
-            viewportTransform.scale,
-            newAngleDeg,
+            viewportTransform.scale,// 保持缩放不变
+            newAngleDeg,// 应用新角度
         );
         this.setTargetTransform(newViewportTransform);
     }
 
+    /**
+     * 【工具锁状态探测】：判断当前是否允许切换工具或执行高危操作
+     * 比如：如果画笔正按在屏幕上画线，此时 getIsLocked() 返回 true，外部就不应该允许切换图层或工具。
+     */
     getIsLocked(): boolean {
         return this.getActiveTool().getIsLocked?.() ?? false;
     }
 
+    /**
+     * 【视图冻结】：让画布暂停响应（常用于系统正在处理繁重任务、弹出模态框或保存文件时）
+     */
     setIsFrozen(b: boolean): void {
         this.isFrozen = b;
     }
@@ -978,7 +1096,9 @@ export class Easel<GToolId extends string> {
         this.viewport.destroy();
         this.pointerListener.destroy();
         this.keyListener.destroy();
+        // 掐断正在排队的 GPU 动画渲染帧
         this.animationFrameId !== undefined && cancelAnimationFrame(this.animationFrameId);
+        // 销毁选区渲染器（停止蚂蚁线动画计算）
         this.selectionRenderer.destroy();
         window.removeEventListener('pointerdown', this.windowPointerListener);
     }
