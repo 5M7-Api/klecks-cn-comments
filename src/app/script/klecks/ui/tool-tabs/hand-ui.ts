@@ -23,6 +23,7 @@ export class HandUi {
     private readonly angleIm: HTMLImageElement;
 
     private updateUi(): void {
+        // ! 这里实时显示画布的缩放和角度的位置
         this.scaleEl.innerHTML = Math.round(this.scale * 100) + '%';
         this.angleEl.innerHTML = Math.round(this.angleDeg) + '°';
 

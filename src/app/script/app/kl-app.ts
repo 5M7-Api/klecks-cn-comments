@@ -815,6 +815,7 @@ export class KlApp {
                 this.mobileColorUi.setIsVisible(toolId !== 'select');
             },
             onTransformChange: (transform, isScaleOrAngleChanged) => {
+                // ! 此处更新了画布实时的旋转、缩放
                 handUi.update(transform.scale, transform.angleDeg);
                 this.toolspaceToolRow.setEnableZoomIn(transform.scale !== EASEL_MAX_SCALE);
                 this.toolspaceToolRow.setEnableZoomOut(transform.scale !== EASEL_MIN_SCALE);
