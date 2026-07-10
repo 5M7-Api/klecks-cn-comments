@@ -1073,6 +1073,32 @@ export class Easel<GToolId extends string> {
         this.setTargetTransform(newViewportTransform);
     }
 
+    // ? 这是额外添加的一个方法，用于测试
+    setScale(scale: number){
+        const viewportTransform = this.targetTransform;
+        const viewportMat = createMatrixFromTransform(viewportTransform);
+
+        const viewportRect = { width: this.width, height: this.height };
+        const viewportCenterP = {
+            x: viewportRect.width / 2,
+            y: viewportRect.height / 2,
+        };
+
+        const newScale = BB.clamp(
+            scale,
+            EASEL_MIN_SCALE,
+            EASEL_MAX_SCALE,
+        );
+
+         const newViewportTransform = createTransform(
+            viewportCenterP,
+            applyToPoint(inverse(viewportMat), viewportCenterP),
+            newScale,
+            viewportTransform.angleDeg,
+        );
+        this.setTargetTransform(newViewportTransform);
+    }
+
     /**
      * 【工具锁状态探测】：判断当前是否允许切换工具或执行高危操作
      * 比如：如果画笔正按在屏幕上画线，此时 getIsLocked() 返回 true，外部就不应该允许切换图层或工具。
