@@ -65,23 +65,49 @@ export function append(target: HTMLElement, els: (HTMLElement | string | undefin
 }
 
 /**
+ * 【核心几何算子：边界框适应等比缩放 (Fit-to-Box / Contain Scaling)】
+ * 将任意尺寸的源图像或画布，按照原始宽高比完美缩放并居中塞入一个既定的限制框内。
+ * 
+ * @param aw Actual Width - 源图/源画布的绝对真实物理宽度 (如 4000px)
+ * @param ah Actual Height - 源图/源画布的绝对真实物理高度 (如 1000px)
+ * @param bw Bounding Width - 目标容器/限制框的最大允许宽度 (如缩略图槽位 30px)
+ * @param bh Bounding Height - 目标容器/限制框的最大允许高度 (如缩略图槽位 30px)
+ * @param min [可选] 最小安全像素阈值 - 防止极端长宽比在缩放后计算出 0px 或无限小数值导致显存崩溃
+ * @returns TSize2D 经过化归计算后，完美适应容器且绝不形变的最终 { width, height }
+ */
+/**
  * a needs to fit into b
  */
 export function fitInto(aw: number, ah: number, bw: number, bh: number, min?: number): TSize2D {
+    // 1. 【降维放大映射】：
+    // 这里并没有先算缩放比例 (scale = bw / aw)，而是故意先把源宽高同时乘上容器宽度 bw。
+    // 只要源图宽度 aw >= 1，这里的 width 一定都会远远大于 target bw，
+    // 从而保证接下来绝对会无条件触发第一个 if 的“X 轴挤压化归”！
     let width = aw * bw,
         height = ah * bw;
+    // 2. 【第一道关卡：X 轴越界挤压 (Width Normalization)】
+    // 如果算出的虚拟宽度超出了边界框的限制：
     if (width > bw) {
+        // 利用同等比例 (bw / width)，把高度也等比例打折压缩
+        // 数学本质：height = (bw / (aw * bw)) * (ah * bw) = (ah / aw) * bw
         height = (bw / width) * height;
         width = bw;
     }
+    // 3. 【第二道关卡：Y 轴越界挤压 (Height Normalization)】
+    // 经过第一关后，如果这本来是一张“竖条长图”，即使宽度缩到了 bw，其高度可能依然高于限制框 bh！
     if (height > bh) {
         width = (bh / height) * width;
         height = bh;
     }
+    // 4. 【硬件渲染安全钳制 (Sub-pixel & 0px Defense)】
+    // 极其关键的防御性编程！当试图把一张 10000x1 的极端细长线条缩放到 30x30 框里时：
+    // 宽度缩为 30px，高度会被等比压缩为 0.003px！
+    // 任何低于 1px 的高宽度如果交给 Canvas 2D 或 WebGL 去分配显存，底层图形驱动都会因为 "0x0 size" 直接崩溃报废。
     if (min) {
         width = Math.max(min, width);
         height = Math.max(min, height);
     }
+    // 5. 返回量体裁衣后的物理安全分辨率
     return { width, height };
 }
 

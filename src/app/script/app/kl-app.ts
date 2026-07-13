@@ -1699,41 +1699,70 @@ export class KlApp {
             },
         });
 
-        // 图层选项的UI组件
+        // 图层选项的UI组件——负责管理图层的列表、增删改查、透明度滑动条、混合模式更改等
         this.layersUi = new KL.LayersUi({
+            // 注入底层多图层画布渲染引擎
             klCanvas: this.klCanvas,
+            // 【核心钩子：当用户在面板里点击并切换了当前选中图层时触发】
+            // @param layerIndex 用户选中的图层序号
+            // @param pushHistory 是否需要将这次“切换图层”的动作记入历史栈（Ctrl+Z可撤销）
             onSelect: (layerIndex, pushHistory) => {
+                // 1. 从底层引擎拿到真实的图层对象，并刷新全局“当前图层”指针
                 const activeLayer = this.klCanvas.getLayer(layerIndex);
                 setCurrentLayer(activeLayer);
 
+                // 2. 【核心黑魔法：历史记录防轰炸与栈顶合并】
                 if (pushHistory) {
+                    // 拿到当前历史栈【最顶端（最末尾）】的那一条历史快照数据
                     const topEntry = this.klHistory.getEntries().at(-1)!.data;
+
+                    // 判断：刚才用户做的最后一件事，是不是【刚好也是“切换图层”】？
+                    // 如果连续两次甚至十次操作都是切换图层，replaceTop 会被标记为 true！
                     const replaceTop = isHistoryEntryActiveLayerChange(topEntry);
 
+                    // 推送新的图层选择记录
                     this.klHistory.push(
                         {
+                            // 只存一个图层 ID 字符串，极其轻量
                             activeLayerId: activeLayer.id,
                         },
+                        // 如果 replaceTop 为 true，直接替换掉上一次的图层选中记录！
                         replaceTop,
                     );
                 }
             },
             parentEl: this.rootEl,
             uiState: this.uiLayout,
+            // 【原子化守护】：切换图层前，强行把正在拉伸的框或者未完成的多边形敲定归档！
+            // TODO：sai2如果出现不可切换图层的情况，会直接禁止用户切换
             applyUncommitted: () => applyUncommitted(),
             klHistory: this.klHistory,
+            // 当图层层级发生改变（比如新建、拖拽排序、合并图层）时，通知视口重新关联项目数据并重绘
             onUpdateProject: () => this.easelProjectUpdater.update(),
+            // 绑定图层清空指令（第二个形参 true 通常代表这属于一个可以被 Ctrl+Z 撤销的动作）
             onClearLayer: () => clearLayer(false, true),
         });
+        // ==========================================
+        // 【组件 2：当前图层微缩预览小工具 (LayerPreview)】
+        // 这是一个悬浮在工作区角落或工具栏下的微缩画框，永远显示当前图层的缩略图
+        // ==========================================
         this.layerPreview = new KL.LayerPreview({
             klRootEl: this.rootEl,
+            // 【极佳的 UX 快捷方式】：
+            // 当用户点击了这个小预览图时，系统自动呼出并展开最右侧/最上方的“图层主面板 (layers tab)”！
             onClick: () => {
                 mainTabRow?.open('layers');
             },
             uiState: this.uiLayout,
             klHistory: this.klHistory,
         });
+        // ==========================================
+        // 【响应式垂直分辨率降级 (Vertical Responsive Degradation)】
+        // ==========================================
+        // 如果当前用户的浏览器窗口内部高度 (uiHeight) 小于 579 像素（例如带鱼屏、笔记本小窗口或横屏手机）：
+        // 强行隐藏这个微缩预览小画框，为用户节省下极度宝贵的屏幕垂直绘制空间！
         this.layerPreview.setIsVisible(this.uiHeight >= 579);
+        // 把第一次打开软件时获取到的默认图层，塞给预览组件进行首屏渲染
         this.layerPreview.setLayer(currentLayer);
 
         // 编辑选项的UI界面(按钮)
