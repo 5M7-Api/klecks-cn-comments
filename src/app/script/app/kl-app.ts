@@ -83,6 +83,7 @@ import { MobileColorUi } from '../klecks/ui/mobile/mobile-color-ui';
 import { getSelectionPath2d } from '../bb/multi-polygon/get-selection-path-2d';
 import { ToolspaceTopRow } from '../klecks/ui/components/toolspace-top-row';
 
+//! 动态注入了滤镜的apply函数！
 importFilters();
 
 type TKlAppOptionsEmbed = {
