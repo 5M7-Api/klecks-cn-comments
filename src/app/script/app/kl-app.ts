@@ -540,53 +540,91 @@ export class KlApp {
             return false;
         };
 
+        /**
+         * 【撤销/重做 核心广播与视觉同步总线】
+         * 当用户触发 Ctrl+Z (Undo) 或 Ctrl+Y (Redo) 成功后，该函数负责协调底层画布、
+         * 视口摄像机(Easel)、UI图层列表以及笔刷状态，把整个界面瞬间拉回快照对齐的状态。
+         * 
+         * @param type 历史命令的执行类型，如 'undo' | 'redo'
+         * @param composedBefore 执行操作【前】的历史快照数据结构
+         */
         const propagateUndoRedoChanges = (
             type: THistoryExecutionType,
             composedBefore: THistoryEntryDataComposed,
         ) => {
+            // 只有纯正的撤销和重做操作，才需要触发全链路视图重构
             if (['undo', 'redo'].includes(type)) {
+                // 1. 获取执行 Undo/Redo 【后】的最新历史快照状态
                 const composedAfter = this.klHistory.getComposed();
-
+                // 2. 【核心引擎差量同步】：把“改前”和“改后”的快照同时传给底层 Canvas！
+                // 为什么要传两个？因为底层不用把所有层都重新画一遍，它会自己做 Diff（差分比对），
+                // 仅仅去局部更新那些在两次快照之间发生了变动的图层像素！
                 this.klCanvas.updateViaComposed(composedBefore!, composedAfter);
-
+                // 3. 【纠正焦点图层】：
+                // 如果用户撤销了一步“删除了第2层”的操作，第2层现在复活了！
+                // 系统必须把当前正在画画的“激活图层(Current Layer)”重新绑回到复活的那个层身上。
                 setCurrentLayer(
                     this.klCanvas.getLayer(
                         composedAfter.layerMap[composedAfter.activeLayerId].index,
                     ),
                 );
+                // 4. 通知主视角画布管理器（Easel Project）：显存数据已经改完了，立刻把最新图像推送到屏幕上！
                 this.easelProjectUpdater.update(); // triggers render
-
+                // 5. 【画布分辨率变更侦测】：
+                // 比较撤销前后的画布尺寸（Width / Height）是否发生了变化？
+                // 什么时候会发生这种事？比如用户按 Ctrl+Z 撤销了一次“裁剪画布(Crop)”或“修改图像分辨率(Resize)”！
                 const dimensionChanged =
                     composedBefore.size.width !== composedAfter.size.width ||
                     composedBefore.size.height !== composedAfter.size.height;
                 if (dimensionChanged) {
+                    // 如果尺寸变了，让摄像机视口（Easel）自动重新计算缩放比例并居中对齐，
+                    // 防止画布突然变大超出屏幕，或者缩成一个小点找不到！
                     this.easel.resetOrFitTransform(true);
                 }
+                // 6. 重置笔刷的最后绘制事件坐标：
+                // 防止用户按了 Undo 后，压感笔在一动一画的时候，产生跟上一次旧历史坐标连线的怪异直线飞线！
                 this.easelBrush.setLastDrawEvent();
+                // 7. 【闭环联动】：通知我们在前几轮拆解过的 LayersUi！
+                // 这句指令正是触发了你先前质疑的“大段代码销毁重建”，把右侧缩略图、层级顺序彻底刷到最新！
                 this.layersUi.update(currentLayer.index);
             }
-
+            // 8. 通知选区工具(Selection / AppSelect)：如果撤销的是“建立选区”操作，虚线框也得跟着出现或消失！
             klAppSelect.onHistory(type);
         };
 
+        /**
+         * 【撤销 (Undo) 动作发起器】 -> 通常绑定给快捷键 Ctrl+Z 或顶栏的向左箭头
+         */
         const undo = (showMessage?: boolean) => {
+            // 1. 【极品 UX 防护】：
+            // tempHistory (临时历史栈) 是用来记录那条刚刚拉出的变形控制框、或还没确定的选区。
+            // 如果临时历史栈已经退无可退了，说明用户正在试图撤销真正的画布内容，
+            // 此时必须强行把还在半空中的变形控制框彻底丢弃 (discardUncommitted)！
             if (!tempHistory.canDecreaseIndex()) {
                 discardUncommitted();
             }
+            // 2. 存下“撤销前”的静态快照
             const composedBefore = this.klHistory.getComposed();
+            // 3. 命令底层历史管理器尝试往后退一步
             const result = klHistoryExecutor.undo();
             if (!result) {
                 // didn't do anything
                 return;
             }
+            // 4. 退步成功！调用上面的总线函数，向全剧组广播“状态改变”！
             propagateUndoRedoChanges(result.type, composedBefore);
+            // 5. 如果操作属于键盘触发或顶栏点击，在画布中心冒出一个黑色半透明的 "撤销 (Undo)" 状态浮层提示
             if (showMessage) {
                 this.statusOverlay.out(LANG('undo'), true);
             }
         };
 
+        /**
+         * 【重做 (Redo) 动作发起器】 -> 通常绑定给快捷键 Ctrl+Y / Ctrl+Shift+Z 或顶栏向右箭头
+         */
         const redo = (showMessage?: boolean) => {
             const composedBefore = this.klHistory.getComposed();
+            // 命令底层历史管理器尝试往后发车一步（把刚刚撤销掉的内容复原回来）
             const result = klHistoryExecutor.redo();
             if (!result) {
                 // didn't do anything
@@ -1793,6 +1831,7 @@ export class KlApp {
             klHistory: this.klHistory,
             tempHistory,
             onCanUndoRedoChange: (canUndo, canRedo) => {
+                // 这里主要是dom状态变化的回调操作
                 this.toolspaceToolRow.setEnableUndo(canUndo);
                 this.toolspaceToolRow.setEnableRedo(canRedo);
             },

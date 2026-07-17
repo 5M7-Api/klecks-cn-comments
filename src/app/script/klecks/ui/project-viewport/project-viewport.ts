@@ -284,8 +284,8 @@ export class ProjectViewport {
         }
 
 
-        console.log('ProjectViewport.render'); 
-        console.dir(this.project);
+        // console.log('ProjectViewport.render'); 
+        // console.dir(this.project);
   
         // TODO：大量图层会不适用此结构
         // ! 此方法是渲染画布随时调用的方法！
@@ -300,6 +300,7 @@ export class ProjectViewport {
             }
             this.ctx.save();
             // 设置该图层的混合模式（比如：正片叠底 'multiply'，滤色 'screen'）
+            // ! 这段代码决定了图层的混合模式：https://developer.mozilla.org/zh-CN/docs/Web/API/CanvasRenderingContext2D/globalCompositeOperation
             this.ctx.globalCompositeOperation = layer.mixModeStr;
             // 设置图层透明度
             this.ctx.globalAlpha = layer.opacity;

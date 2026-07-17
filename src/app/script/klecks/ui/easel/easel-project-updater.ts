@@ -53,8 +53,8 @@ export class EaselProjectUpdater<T extends string> {
                 this.compositeCanvas = undefined;
             }
         }
-        console.log('EaselProjectUpdater.update layer: ');
-        console.dir(layers);
+        // console.log('EaselProjectUpdater.update layer: ');
+        // console.dir(layers);
         // 2. 映射层：Easel 并不直接操作 KlCanvas 内部引用，而是读取一份结构化的副本
         const compositeCanvas = this.compositeCanvas;
         this.easel.setProject({

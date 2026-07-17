@@ -1057,6 +1057,7 @@ export class LayersUi {
                 }),
                 // 【状态机回调：当画师在下拉菜单里切了不同的混合模式时触发】
                 onChange: (val) => {
+                    // console.log("混合模式：",val)
                     // A. 指挥底层画布显存将该图层合成模式改写 (例如改为 Canvas API 支持的 'multiply')
                     this.klCanvas.setMixMode(this.selectedSpotIndex, val as TMixMode);
                     // B. 局部更新页面 UI 和右侧面板状态
