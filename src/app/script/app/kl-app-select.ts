@@ -250,7 +250,13 @@ export class KlAppSelect {
         }
     }
 
+    /**
+     * 【核心：实时渲染欺骗引擎】
+     * 作用：在用户拖拽选区变形框时，向底层画布注入“实时渲染外挂”。
+     * 它是视觉上实现“抠图拖拽预览”的真正幕后黑手。
+     */
     private updateComposites(): void {
+        // 如果当前没有在变形状态，直接退出
         if (!this.transformState) {
             return;
         }
@@ -258,11 +264,15 @@ export class KlAppSelect {
         const srcLayerCanvas = this.getCurrentLayerCtx().canvas;
         const srcLayerIndex = throwIfNull(this.klCanvas.getLayerIndex(srcLayerCanvas));
 
+        // 【数据封包】：把所有数学变形指令和抠出来的像素，打包成一个 Config
         const config: Parameters<typeof createTransformationComposite>[0] = {
             klCanvasWidth: this.klCanvas.getWidth(),
             klCanvasHeight: this.klCanvas.getHeight(),
+             // 数学变形矩阵 (位移、缩放、旋转)
             transform: this.transformState.transform,
+            // 矢量选区边界 (蚂蚁线路径)
             selection: this.transformState.selection,
+            // 悬浮像素大图 (抠出来的图块)
             selectionSample: this.transformState.selectionSample,
             algorithm: this.transformState.algorithm,
             doClone: this.transformState.doClone,
@@ -270,13 +280,20 @@ export class KlAppSelect {
                 srcLayerIndex !== 0 || this.transformState.backgroundIsTransparent,
             ffdRenderer: this.ffdRenderer,
         };
+        // 【兵分两路：单图层 vs 跨图层渲染】
         if (srcLayerIndex === this.transformState.targetLayerIndex) {
+            // 模式 A：在同一个图层里移动选区
+            // 底层渲染器需要同时干两件事：在原位置挖个洞 + 在新位置画出图块
             this.klCanvas.setComposite(
                 srcLayerIndex,
                 createTransformationComposite(config, 'same'),
             );
         } else {
+            // 模式 B：跨图层移动 (比如从 图层1 抠出一个苹果，准备放在 图层2 上)
+            // 这是一个极其极其复杂的渲染分离逻辑！
+            // 1. 对于原图层 (src)，只执行“挖洞”操作 (除非 doClone 为 true)
             this.klCanvas.setComposite(srcLayerIndex, createTransformationComposite(config, 'src'));
+            // 2. 对于目标图层 (dest)，只执行“悬浮绘制”操作
             this.klCanvas.setComposite(
                 this.transformState.targetLayerIndex,
                 createTransformationComposite(config, 'dest'),
@@ -284,6 +301,10 @@ export class KlAppSelect {
         }
     }
 
+    /**
+     * 【视图同步】：更新 UI 面板上的图层下拉列表
+     * 当选区变形涉及跨图层操作时，通知 UI 刷新，让用户知道当前像素将要落入哪个图层。
+     */
     private updateUiLayerList(): void {
         this.selectUi.setLayers(
             this.klCanvas.getLayers().map((layer) => {
