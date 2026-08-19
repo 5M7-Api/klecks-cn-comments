@@ -313,6 +313,10 @@ export class KlAppSelect {
         );
     }
 
+      /**
+     * 【状态清道夫】：彻底重置（取消）当前的选区
+     * 作用：清空逻辑层、视图层和 UI 层的多边形状态，取消对画笔操作的区域限制。
+     */
     private resetSelection(): void {
         this.selectTool.reset();
         const selection = this.selectTool.getSelection();
@@ -320,13 +324,19 @@ export class KlAppSelect {
         this.selectUi.setHasSelection(!!selection);
     }
 
+       /**
+     * 【临时时间胶囊】：将当前的数学变换状态推入轻量级交互历史栈
+     * 作用：实现拖拽变形框时的“细粒度撤销 (Ctrl+Z)”。
+     */
     private tempHistoryPush(): void {
         if (!this.transformState) {
             return;
         }
+        // 1. 生成极轻量级的数学快照 (纯数据载体，无重型位图)
         const newEntry: TSelectTransformTempEntry = {
             type: 'select-transform',
             data: {
+                // 【关键防御】：必须深拷贝！否则后续的修改会污染历史记录里指向同一个内存地址的对象。
                 transform: BB.copyObj(this.transformState.transform),
                 doClone: this.transformState.doClone,
                 targetLayerIndex: this.transformState.targetLayerIndex,
@@ -334,36 +344,59 @@ export class KlAppSelect {
                 algorithm: this.transformState.algorithm,
             },
         };
+        // 2. 获取栈顶的最后一条记录
         const topEntry = this.tempHistory.getEntries().at(-1);
+        // 3. 【防呆/节流过滤】：
+        // 如果这次存的快照和上一次一模一样（比如用户点了一下手柄但没移动就松手了），
+        // 坚决不压入历史栈，防止制造无效的撤销步骤恶心用户。
         // skip if no change
         if (JSON.stringify(newEntry) === JSON.stringify(topEntry)) {
             return;
         }
+        // 4. 正式压入临时时间线
         this.tempHistory.push(newEntry);
     }
 
+        /**
+     * 【中央广播神经】：将形变的改变强制同步给整个绘图引擎系统
+     * 作用：当用户拉动控制手柄时，牵一发而动全身。
+     * @param skipPushUndo 是否跳过推入撤销栈（比如仅仅是在拖拽过程中的实时预览，不需要记录到历史）
+     */
     private propagateTransformationChange(skipPushUndo = false): void {
         if (!this.transformState) {
             return;
         }
+        // 1. 【同步矢量边界】：让屏幕上的虚线“蚂蚁线”跟着跑
         if (this.transformState.selection) {
+            // 利用纯数学矩阵运算，实时计算出缩放/旋转/平移后的新多边形顶点坐标
             const selection = transformSelection(
                 this.transformState.transform,
                 this.transformState.selection,
             );
+            // 提交给前端 View 视图层(Easel)进行实时路径绘制
             this.easelSelect.setRenderedSelection(selection);
         }
+        // 2. 【同步位图视觉】：更新底层渲染欺骗引擎，让图片块跟着鼠标跑
         this.updateComposites();
+        // 3. 【同步外部系统】：通知外部的 React/Vue 框架去更新图层缩略图和导航器
         this.onUpdateProject();
+        // 4. 【同步侧边栏】：更新右侧 UI 面板（比如可能要刷新 x, y 坐标的数值显示框）
         this.updateSelectUi();
-
+        // 5. 【记录历史】：看情况是否把这一帧当成一个“里程碑”存入临时栈
         !skipPushUndo && this.tempHistoryPush();
     }
 
+    /**
+     * 【UI 数值双向绑定同步】：更新右侧属性面板的数值输入框
+     * 作用：当用户在画布上直接拖拽“自由变换把手”时，将最新的数学状态反向推给 UI。
+     */
     private updateSelectUi(): void {
         if (!this.transformState) {
             return;
         }
+
+        // 【防御性逻辑】：高级的 FFD(网格液化变形) 无法用简单的长宽比和旋转角度来描述！
+        // 只有当类型是基础的 'free' (自由变换) 时，才去更新界面上的 x/y/scale 数值框。
         if (this.transformState.transform.type !== 'ffd') {
             this.selectUi.setFreeTransformTransformation(
                 this.transformState.transform.freeTransform,
@@ -371,9 +404,15 @@ export class KlAppSelect {
         }
     }
 
+    /**
+     * 【显存终极清道夫】：彻底销毁当前的变形状态，并释放一切离屏资源。
+     * 作用：这是防止 Web 端图形软件发生致命 OOM（Out Of Memory 显存溢出）崩溃的护城河。
+     */
     private clearTransformState(): void {
         if (this.transformState) {
+            // BB.freeCanvas 内部会通过强制将 canvas.width = 0 来迫使浏览器立刻、当场释放其持有的 VRAM(显存)。
             BB.freeCanvas(this.transformState.selectionSample.image);
+            // 安全切断所有引用，允许 JavaScript 引擎在下一轮 GC 销毁状态机对象。
             this.transformState = undefined;
         }
     }
@@ -389,6 +428,8 @@ export class KlAppSelect {
         this.onFill = p.onFill;
         this.onErase = p.onErase;
 
+        // 2. 【状态同步】：监听主历史栈的变动
+        // 应用场景：当用户按 Ctrl+Z 撤销了一次选区操作，我们需要立刻通知右侧 UI 面板更新状态
         // keep layer list up-to-date
         this.klHistory.addListener(() => {
             this.selectUi.setHasSelection(!!this.klCanvas.getSelection());
@@ -397,10 +438,14 @@ export class KlAppSelect {
             }
         });
 
+        // 3. 实例化纯逻辑层的选区计算工具（只负责数学多边形的并/交/差集运算）
         this.selectTool = new SelectTool({
             klCanvas: this.klCanvas,
         });
+        // 4. 实例化高级网格液化渲染器
         this.ffdRenderer = new FfdRenderer();
+         // 5. 【极限显存优化】：后台标签页自动释放
+        // 当用户切换到别的浏览器标签页时，强行释放网格变形占用的 GPU 显存，防止浏览器后台崩溃
         this.onVisibilityChange = () => {
             if (document.hidden && this.selectMode === 'transform') {
                 this.ffdRenderer.freeResources();
@@ -408,20 +453,24 @@ export class KlAppSelect {
         };
         document.addEventListener('visibilitychange', this.onVisibilityChange);
 
+        // 6. 【视图层通信枢纽】：初始化 EaselSelect（屏幕上负责绘制/拖拽虚线框的模块）
         this.easelSelect = new EaselSelect({
             selectMode: this.selectMode,
+            // 以下回调将 Easel 的“鼠标滑动”映射为 SelectTool 的“数学计算”，再反哺回 Easel 进行“渲染”
             onStartSelect: (p, operation) => this.selectTool.startSelect(p, operation),
             onGoSelect: (p, isShiftPressed) => {
-                this.selectTool.goSelect(p, isShiftPressed);
-                this.easelSelect.setRenderedSelection(this.selectTool.getSelection());
+                this.selectTool.goSelect(p, isShiftPressed); // 计算多边形
+                this.easelSelect.setRenderedSelection(this.selectTool.getSelection());// 实时渲染虚线
             },
             onEndSelect: () => {
                 this.selectTool.endSelect();
                 const selection = this.selectTool.getSelection();
                 this.easelSelect.clearRenderedSelection();
+                // ! 真正将选区写入底层 Canvas，产生蒙版限制画笔
                 this.klCanvas.setSelection(selection);
                 this.selectUi.setHasSelection(!!selection);
             },
+            // 针对“仅仅是平移选区虚线框（不包含图像像素）”的操作
             onStartMoveSelect: (p) => {
                 this.selectTool.startMoveSelect(p);
             },
@@ -439,6 +488,7 @@ export class KlAppSelect {
                 this.klCanvas.setSelection(selection);
                 this.selectUi.setHasSelection(!!selection);
             },
+             // 魔术棒/油漆桶 等点击后增加多边形区块的操作
             onSelectAddPoly: (p, operation) => {
                 this.selectTool.addPoly(p, operation);
                 const selection = this.selectTool.getSelection();
@@ -446,24 +496,33 @@ export class KlAppSelect {
                 this.selectUi.setHasSelection(!!selection);
             },
             onResetSelection: () => this.resetSelection(),
+             // 自由变换框（8个把手）被拖动时的实时回调
             onTransform: (transform) => {
                 if (!this.transformState) {
                     return;
                 }
+                // 更新矩阵数据，并通知全图（画布、蚂蚁线、导航器缩略图）进行实时渲染刷新
                 this.transformState.transform = transform;
                 this.propagateTransformationChange(true);
             },
+            // 拖动把手后松开鼠标的瞬间，压入轻量级临时撤销栈
             onTransformEnd: () => {
                 this.tempHistoryPush();
             },
         });
 
+        // 7. 【UI 层通信枢纽】：初始化右侧的控制面板
         this.selectUi = new SelectUi({
+            // 核心状态机切换：在“选区(套索)”和“变形(Ctrl+T)”之间切换
             onChangeMode: (mode) => {
                 if (mode === 'select') {
+                    // ==========================================
+                    // 退出变形模式 (提交变更 Commit)
+                    // ==========================================
                     const layerIndex = throwIfNull(
                         this.klCanvas.getLayerIndex(this.getCurrentLayerCtx().canvas),
                     );
+                    // 防呆：如果真的发生了像素移动/变形/跨图层，才执行昂贵的应用操作
                     if (
                         this.transformState &&
                         (this.isTransformationChanged() ||
@@ -472,8 +531,8 @@ export class KlAppSelect {
                             this.selectUi.getIsWarping())
                     ) {
                         // something changed -> apply
-
                         const transform = this.transformState.transform;
+                        // 基础 2D 仿射变换
                         if (transform.type === 'free') {
                             klCanvasTransform({
                                 klCanvas: this.klCanvas,
@@ -489,6 +548,7 @@ export class KlAppSelect {
                                 selection: this.transformState.selection,
                             });
                         } else {
+                            // 高级 FFD 网格液化变形 (支持单纯网格，或带着网格一起外部框选拉伸)
                             const ffd =
                                 transform.type === 'ffd+free'
                                     ? transformFfd(
@@ -524,10 +584,12 @@ export class KlAppSelect {
                                 });
                             }
                         }
+                        // 提交完毕，释放所有的缓存和小 Canvas 显存
                         this.clearTransformState();
                         p.statusOverlay.out(LANG('select-transform-applied'), true);
                     }
 
+                    // 彻底清理临时栈和渲染劫持特效，恢复正常绘图环境
                     this.tempHistory.clear();
                     this.tempHistory.setIsActive(false);
                     this.selectUi.setIsWarping(false);
@@ -540,12 +602,17 @@ export class KlAppSelect {
                     this.onUpdateProject();
                     this.easelSelect.setMode(mode);
                 } else {
+                    // ==========================================
+                    // 进入变形模式 (初始化机甲数据 Init Transform)
+                    // ==========================================
                     // -> transform
 
                     // avoid changing state while mode-change can be rejected
                     const currentLayerCanvas = this.getCurrentLayerCtx().canvas;
                     const layerIndex = throwIfNull(this.klCanvas.getLayerIndex(currentLayerCanvas));
+                    // 把要变形的像素瞬间抠出来存入内存 (离屏 Canvas)
                     const selectionSample = createSelectionSample(layerIndex, this.klCanvas);
+                    // 防呆拦截：如果框了一片全透明的地方，直接拒绝进入变形模式
                     if (!selectionSample) {
                         setTimeout(() => {
                             showModal({
@@ -555,10 +622,10 @@ export class KlAppSelect {
                         });
                         return false;
                     }
-
                     this.tempHistory.setIsActive(true);
                     const isBgLayer = layerIndex === 0;
                     let isTransparent = false;
+                    // 背景层透明度特判 (如果背景是透明的，剪切移动后原处不会变成白色，而是透明孔洞)
                     if (isBgLayer) {
                         const layer = Object.entries(this.klHistory.getComposed().layerMap).find(
                             ([_, layer]) => layer.index === layerIndex,
@@ -566,6 +633,7 @@ export class KlAppSelect {
                         isTransparent = testComposedLayerHasTransparency(layer);
                         this.selectUi.setBackgroundIsTransparent(isTransparent);
                     }
+                    // 创建并挂载变形状态机
                     this.transformState = initialiseTransformState({
                         selection: this.klCanvas.getSelection(),
                         selectionSample: selectionSample,
@@ -573,16 +641,18 @@ export class KlAppSelect {
                         targetLayerIndex: layerIndex,
                         backgroundIsTransparent: isTransparent,
                     });
-
+                    // 压入最开始没做任何操作的第 0 帧快照
                     // push initial state
                     this.tempHistoryPush();
 
+                     // 配置 UI 视图并激活底层渲染劫持引擎
                     this.selectUi.setShowTransparentBackgroundToggle(isBgLayer);
                     this.updateComposites();
                     this.updateUiLayerList();
                     this.selectUi.setMoveToLayer(undefined);
                     this.onUpdateProject();
                     this.easelSelect.setMode(mode);
+                    // 同步矢量蚂蚁线
                     if (this.transformState.selection) {
                         const transformedSelection = transformSelection(
                             this.transformState.transform,
@@ -596,30 +666,34 @@ export class KlAppSelect {
                 this.selectMode = mode;
                 return true;
             },
+            // 布尔运算切换：新选区是 替换/相加/相减/相交
             onChangeBooleanOperation: (operation) => {
                 this.easelSelect.setBooleanOperation(operation);
             },
+            // 选区基础操作面板
             select: {
                 shape: this.selectTool.getShape(),
                 onChangeShape: (shape) => {
-                    this.selectTool.setShape(shape);
-                    this.easelSelect.setSelectShape(shape);
+                    this.selectTool.setShape(shape); // 修改逻辑层形状 (套索/矩形/椭圆)
+                    this.easelSelect.setSelectShape(shape);// 修改视图层交互行为
                 },
-                onReset: () => this.resetSelection(),
+                onReset: () => this.resetSelection(), // 全选取消 (Ctrl+D)
                 onAll: () => {
-                    this.selectTool.selectAll();
+                    this.selectTool.selectAll(); // 全选 (Ctrl+A)
                     const selection = this.selectTool.getSelection();
                     this.klCanvas.setSelection(selection);
                     this.selectUi.setHasSelection(!!selection);
                 },
                 onInvert: () => {
-                    this.selectTool.invertSelection();
+                    this.selectTool.invertSelection(); // 反选 (Ctrl+Shift+I)
                     const selection = this.selectTool.getSelection();
                     this.klCanvas.setSelection(selection);
                     this.selectUi.setHasSelection(!!selection);
                 },
             },
+            // 变形高级操作面板 (翻转/旋转/克隆/图层穿梭/液化)
             transform: {
+                // 垂直翻转
                 onFlipY: () => {
                     if (!this.transformState) {
                         return;
@@ -631,6 +705,7 @@ export class KlAppSelect {
                     this.propagateTransformationChange();
                     this.easelSelect.setTransform(this.transformState.transform);
                 },
+                // 水平翻转
                 onFlipX: () => {
                     if (!this.transformState) {
                         return;
@@ -642,6 +717,7 @@ export class KlAppSelect {
                     this.propagateTransformationChange();
                     this.easelSelect.setTransform(this.transformState.transform);
                 },
+                // 精确角度旋转
                 onRotateDeg: (deg) => {
                     if (!this.transformState) {
                         return;
@@ -653,6 +729,7 @@ export class KlAppSelect {
                     this.propagateTransformationChange();
                     this.easelSelect.setTransform(this.transformState.transform);
                 },
+                // “盖章”克隆功能：中途不退出变形，直接在画布上永久印下一个拷贝
                 onClone: () => {
                     if (!this.transformState) {
                         return;
@@ -688,6 +765,7 @@ export class KlAppSelect {
                             });
                         }
                     } else {
+                        // FFD 液化相关克隆处理
                         const ffd =
                             transform.type === 'ffd+free'
                                 ? transformFfd(
@@ -724,6 +802,7 @@ export class KlAppSelect {
                         }
                     }
 
+                    // 克隆后，将状态从“剪切模式”强行转入“克隆模式”
                     this.tempHistory.clear();
                     // push initial state
                     this.tempHistoryPush();
@@ -734,6 +813,7 @@ export class KlAppSelect {
 
                     this.statusOverlay.out(LANG('select-transform-clone-applied'), true);
                 },
+                // 百分比缩放
                 onScale: (factor) => {
                     if (!this.transformState) {
                         return;
@@ -745,6 +825,7 @@ export class KlAppSelect {
                     this.propagateTransformationChange();
                     this.easelSelect.setTransform(this.transformState.transform);
                 },
+                // 一键居中
                 onCenter: () => {
                     if (!this.transformState) {
                         return;
@@ -759,6 +840,7 @@ export class KlAppSelect {
                     this.propagateTransformationChange();
                     this.easelSelect.setTransform(this.transformState.transform);
                 },
+                // 跨图层降维转移：选中一块像素，直接丢到其他图层
                 onMoveToLayer: (index) => {
                     if (!this.transformState) {
                         return;
@@ -769,6 +851,7 @@ export class KlAppSelect {
                     this.onUpdateProject();
                     this.tempHistoryPush();
                 },
+                // 切换重采样算法（如临近像素、双线性）
                 onChangeTransparentBackground: (isTransparent) => {
                     if (!this.transformState) {
                         return;
@@ -788,18 +871,22 @@ export class KlAppSelect {
                     this.tempHistoryPush();
                 },
                 onChangeConstrain: (isConstrained) => {
+                    // 开启约束（Shift 等比缩放）
                     this.easelSelect.setIsConstrained(isConstrained);
                 },
                 onChangeSnapping: (isSnapping) => {
+                     // 开启吸附（磁吸对齐）
                     this.easelSelect.setIsSnapping(isSnapping);
                 },
                 onChangeWarp: (isWarping) => {
+                    // 【神级降维与升维机制】：在 普通 4 角形变换与 5x5 网格 FFD 液化之间切换！
                     if (!this.transformState) {
                         return;
                     }
                     const transform = this.transformState.transform;
                     if (isWarping) {
                         if (transform.type === 'free') {
+                            // 升维：将 4角矩阵转化并施加到一个新生成的 5x5 网格上
                             const selectionBounds = getSelectionBoundsFromSample(
                                 this.transformState.selectionSample,
                             );
@@ -815,6 +902,7 @@ export class KlAppSelect {
                                 ),
                             };
                         } else if (transform.type === 'ffd+free') {
+                             // 从叠加复合状态恢复回纯网格状态
                             const matrix = freeTransformToMatrix(
                                 transform.freeTransform,
                                 rectToBounds(transform.ffdBounds, 'index'),
@@ -826,6 +914,8 @@ export class KlAppSelect {
                         }
                     } else {
                         if (transform.type === 'ffd') {
+                            // 降维：网格已经被扭曲，无法转回普通四角框。
+                            // 方案：将原网格冻结，并在外面套一个新的四角自由变换框 (ffd+free 状态嵌套)！
                             const ffdBounds = boundsToRect(getFfdBounds(transform.ffd));
                             const freeTransform = rectToFreeTransform(ffdBounds);
                             this.transformState.transform = {
@@ -843,14 +933,16 @@ export class KlAppSelect {
                     this.tempHistoryPush();
                 },
             },
+            // 捷径指令绑定
             onErase: () => {
-                this.onErase();
+                this.onErase(); // Delete键清空选区
             },
             onFill: () => {
-                this.onFill();
+                this.onFill(); // 快捷填充前景色
             },
         });
 
+        // 8. 最后的底线保护：每当历史记录改变时，确保逻辑层里的选区路径和底层真实画板同步
         this.klHistory.addListener(() => {
             const selection = this.klCanvas.getSelection();
             if (this.selectMode === 'select') {
@@ -871,6 +963,15 @@ export class KlAppSelect {
         return this.selectMode;
     }
 
+       /**
+     * 【大局观架构：统一指令出口】
+     * 作用：提交（确认）当前的变形操作。
+     * 精髓：它本身没有任何渲染逻辑，而是巧妙地通过切换 UI 模式，
+     * 来触发构造函数中注册的那个极其复杂的 onChangeMode 回调。
+     * 保证了无论是按钮点击、回车键还是代码调用，出口绝对统一。
+     * 
+     * @returns boolean 是否真的触发了提交
+     */
     /**
      * If transform changed something, changes are applied. -> return true
      * If no changes applied -> return false
@@ -878,15 +979,23 @@ export class KlAppSelect {
     commitTransform(): boolean {
         let result = false;
         if (this.selectMode === 'transform') {
+            // 切换回套索模式，这会同步触发 SelectUi 内部的 onChangeMode，执行真正的像素应用逻辑
             this.selectUi.setMode('select'); // this triggers selectUi.onMode
             result = true;
         }
         return result;
     }
 
+    /**
+     * 【杀人灭口：取消变形】
+     * 作用：放弃当前的变形操作（通常由 Esc 键或取消按钮触发）。
+     * 精髓：在触发统一出口前，提前将内存里的 transformState 清空。
+     * 当执行大审判（onChangeMode）时，由于找不到状态机，直接放弃一切绘制。
+     */
     /** if transforming, changes are discarded */
     discardTransform(): boolean {
         if (this.selectMode === 'transform') {
+            // 提前销毁证据：把变形矩阵和位图样本都设为 undefined
             // so there's no transformation to apply.
             this.clearTransformState();
             // this triggers selectUi.onMode synchronously, which does the cleanup
@@ -896,26 +1005,36 @@ export class KlAppSelect {
         return false;
     }
 
+    /**
+     * 【时光倒流机器】：响应临时历史记录的微步撤销/重做
+     * 作用：当用户在拉伸变形框中途按 Ctrl+Z/Ctrl+Y 时，回退/前进一个数学变换状态。
+     */
     onHistory(type: THistoryExecutionType): void {
+        // 只有当存在活跃的变形状态机，且触发的确实是“微历史（tempUndo/Redo）”时才执行
         if (this.transformState && (type === 'tempUndo' || type === 'tempRedo')) {
+            // 1. 打扫案发现场：清除旧的图层悬浮挖空效果
             this.resetKlCanvasLayerComposites();
+            // 2. 拿出刚被推到栈顶的那张旧照片 (历史切片)
             // recreate
             const entries = this.tempHistory.getEntries();
             const top = entries.at(-1)!;
+            // 类型断言防呆保护
             if (!isSelectTransformTempEntry(top)) {
                 return;
             }
             const state = top.data;
-            this.transformState.transform = BB.copyObj(state.transform);
+            // 3. 【暴力覆盖】：用历史切片里的数据，强制覆盖当前状态机里的所有物理属性
+            this.transformState.transform = BB.copyObj(state.transform);// 必须深拷贝！
             this.transformState.doClone = state.doClone;
             this.transformState.targetLayerIndex = state.targetLayerIndex;
             this.transformState.backgroundIsTransparent = state.backgroundIsTransparent;
             this.transformState.algorithm = state.algorithm;
             this.transformState.isWarping = state.transform.type === 'ffd';
+            // 4. 同步右侧 UI 控制面板的状态开关 (透明保护、重采样算法等)
             this.selectUi.setBackgroundIsTransparent(state.backgroundIsTransparent);
             this.selectUi.setAlgorithm(state.algorithm);
             this.selectUi.setIsWarping(state.transform.type === 'ffd');
-
+            // 5. 【矢量同步】：如果在拖拽时有蚂蚁线选区，重新用旧矩阵把多边形投射回旧位置
             if (this.transformState.selection) {
                 const selection = transformSelection(
                     this.transformState.transform,
@@ -923,6 +1042,7 @@ export class KlAppSelect {
                 );
                 this.easelSelect.setRenderedSelection(selection);
             }
+            // 6. 【UI同步】：把手柄框移动回旧位置，并刷新图层选择下拉框
             this.easelSelect.setTransform(this.transformState.transform);
             this.selectUi.setMoveToLayer(
                 this.klCanvas.getLayerIndex(this.getCurrentLayerCtx().canvas) ===
@@ -930,6 +1050,7 @@ export class KlAppSelect {
                     ? undefined
                     : state.targetLayerIndex,
             );
+            // 7. 【渲染欺骗重置】：把底层的位图小块也悬浮回旧位置，并高喊全世界更新缩略图
             this.updateComposites();
             this.onUpdateProject();
             this.updateSelectUi();
