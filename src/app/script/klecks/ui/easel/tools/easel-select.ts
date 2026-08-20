@@ -330,7 +330,7 @@ export class EaselSelect implements TEaselTool {
     }
 
     // ==========================================
-    // 2. 分支 A：仅仅是平移现有选区的虚线框 (不含图像像素)
+    // TODO：不需要该功能，移动就是移动像素。2. 分支 A：仅仅是平移现有选区的虚线框 (不含图像像素)
     // ==========================================
     if (this.selectSelectMode === "move") {
       if (event.type === "pointerdown" && event.button === "left") {
