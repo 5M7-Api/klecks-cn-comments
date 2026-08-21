@@ -138,7 +138,7 @@ export class EaselSelect implements TEaselTool {
   private easel: TEaselInterface = {} as TEaselInterface;
   // 当前画布的 缩放/旋转/平移 矩阵
   private viewportTransform: TViewportTransform = {} as TViewportTransform;
-  // !【极客级碰撞检测优化】：1x1 像素的离屏 Canvas
+  // TODO:【极客级碰撞检测优化】：1x1 像素的离屏 Canvas 不需要考虑选区移动问题
   // 为什么需要这个？因为选区往往是极其复杂的几何多边形（有无数的顶点和孔洞）。
   // 用纯数学算法去判断“鼠标是否点在了选区内部”性能极差且极易出 Bug。
   // 这里利用底层 C++ 引擎提供的终极捷径：`tempCtx.isPointInPath(path, x, y)`。
@@ -312,7 +312,7 @@ export class EaselSelect implements TEaselTool {
       x: event.relX,
       y: event.relY,
     });
-    // 意图预测：用户是不是想移动现有选区？
+    // TODO：意图预测：用户是不是想移动现有选区？
     const doMove = this.getDoMoveSelection(effectiveOperation, cursorCanvasPos);
     // ==========================================
     // 1. 基础拖拽状态维护
@@ -558,7 +558,7 @@ export class EaselSelect implements TEaselTool {
 
   /**
    * 【机甲舱初始化】：创建用于 4 角自由拉伸的控制框
-   * 这个对象在屏幕上画出 8 个小方块（控制手柄），并接管了这 8 个小方块的鼠标拖拽事件。
+   * 这个对象在屏幕上画出 4 个角落缩放手柄和 1 个旋转手柄，并接管了它们的鼠标拖拽事件。
    */
   private createFreeTransform(): void {
     this.freeTransform = new FreeTransform({
