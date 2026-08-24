@@ -78,12 +78,13 @@ export type TEaselSelectParams = {
   onStartSelect: (p: TVector2D, operation: TBooleanOperation) => void; // 鼠标按下：开始画套索。operation 决定是新建、加选还是减选。
   onGoSelect: (p: TVector2D, isShiftPressed: boolean) => void; // 鼠标拖动：正在画。isShiftPressed 用来判断是否要开启约束（比如画出完美的正圆形/正方形）
   onEndSelect: () => void; // 鼠标松开：画完了。此时应该去触发底层逻辑合并多边形。
+  //TODO：移动选区不需要
   // 如果用户的鼠标不是点在空白处，而是点在了已经存在的“蚂蚁线”里面拖动，
   // 就会触发 MoveSelect 系列回调，也就是“仅平移选区框（不带走像素）”。
   onStartMoveSelect: (p: TVector2D) => void;
   onGoMoveSelect: (p: TVector2D, isShiftPressed: boolean) => void;
   onEndMoveSelect: () => void;
-  // 用于魔术棒/油漆桶工具：直接塞进来一个算好的多边形路径，合并进现有选区。
+  //直接塞进来一个算好的多边形路径，合并进现有选区。
   onSelectAddPoly: (path: TVector2D[], operation: TBooleanOperation) => void;
   // 取消全选 (Ctrl + D)
   onResetSelection: () => void;
@@ -115,6 +116,7 @@ export class EaselSelect implements TEaselTool {
   ) => void;
   private readonly onGoSelect: (p: TVector2D, isShiftPressed: boolean) => void;
   private readonly onEndSelect: () => void;
+  // TODO: Move类移动选区都不要
   private readonly onStartMoveSelect: (p: TVector2D) => void;
   private readonly onGoMoveSelect: (
     p: TVector2D,
@@ -168,6 +170,7 @@ export class EaselSelect implements TEaselTool {
 
   // 选区子模式
   // select-mode state
+  // TODO：选区不可拖动
   private selectSelectMode: "select" | "move" = "select"; // 是画新选区，还是拖动旧选区的虚线框
   private didSelectionMove: boolean = false;
 
@@ -277,6 +280,7 @@ export class EaselSelect implements TEaselTool {
 
   /**
    * TODO：sai中选区是不可拖动的，拖动操作会导致选区内像素位移
+   * ? 现行代码换成了getDoMovePixels
    * 【鼠标悬停探测】：用户是否想拖动/平移当前的选区边界？
    * 作用：利用 1x1 离屏 Canvas 的极速硬件接口，判断鼠标坐标是否落在蚂蚁线内部。
    */

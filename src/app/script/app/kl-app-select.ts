@@ -497,7 +497,7 @@ export class KlAppSelect {
         this.klCanvas.setSelection(selection);
         this.selectUi.setHasSelection(!!selection);
       },
-      // 针对“仅仅是平移选区虚线框（不包含图像像素）”的操作
+      // TODO:针对“仅仅是平移选区虚线框（不包含图像像素）”的操作
       onStartMoveSelect: (p) => {
         this.selectTool.startMoveSelect(p);
       },
@@ -515,7 +515,7 @@ export class KlAppSelect {
         this.klCanvas.setSelection(selection);
         this.selectUi.setHasSelection(!!selection);
       },
-      // 魔术棒/油漆桶 等点击后增加多边形区块的操作
+      // 点击后增加多边形区块的操作
       onSelectAddPoly: (p, operation) => {
         this.selectTool.addPoly(p, operation);
         const selection = this.selectTool.getSelection();
