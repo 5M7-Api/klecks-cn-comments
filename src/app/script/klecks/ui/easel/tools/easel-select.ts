@@ -419,7 +419,6 @@ export class EaselSelect implements TEaselTool {
           }
         }
       } else {
-        // 3.2 连续型：普通套索 (按住鼠标连续画圈) / 矩形 / 椭圆
         if (event.type === "pointerdown" && event.button === "left") {
           this.appliedBooleanOperation = effectiveOperation;
           this.onStartSelect(cursorCanvasPos, this.appliedBooleanOperation!);
